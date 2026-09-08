@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EasyWeb</title>
+    <link rel="stylesheet" href="styles/popup.css">
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <div class="brand-mark" aria-hidden="true">E</div>
+        <div>
+          <h1>EasyWeb</h1>
+          <p>Controles de acessibilidade</p>
+        </div>
+        <span class="version">0.1.0-dev</span>
+      </header>
+
+      <section class="status-row" aria-live="polite">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Pronto para ajustar esta página</span>
+      </section>
+
+      <label class="switch-row" for="enabled">
+        <span>
+          <strong>Ajustes ativos</strong>
+          <small>Aplicar na página atual</small>
+        </span>
+        <input id="enabled" type="checkbox" checked>
+        <span class="switch" aria-hidden="true"></span>
+      </label>
+
+      <div class="controls">
+        <label class="control" for="font-scale">
+          <span class="control-heading">
+            <span>Tamanho do texto</span>
+            <output id="font-scale-value">100%</output>
+          </span>
+          <input id="font-scale" type="range" min="80" max="160" step="10" value="100">
+        </label>
+
+        <label class="control" for="line-height">
+          <span class="control-heading">
+            <span>Espaçamento entre linhas</span>
+            <output id="line-height-value">1,4x</output>
+          </span>
+          <input id="line-height" type="range" min="100" max="220" step="10" value="140">
+        </label>
+
+        <label class="control" for="letter-spacing">
+          <span class="control-heading">
+            <span>Espaçamento entre letras</span>
+            <output id="letter-spacing-value">0px</output>
+          </span>
+          <input id="letter-spacing" type="range" min="0" max="3" step="0.5" value="0">
+        </label>
+      </div>
+
+      <div class="options">
+        <label class="check-row" for="contrast">
+          <input id="contrast" type="checkbox">
+          <span class="check-box" aria-hidden="true"></span>
+          <span>Alto contraste</span>
+        </label>
+        <label class="check-row" for="highlight-links">
+          <input id="highlight-links" type="checkbox">
+          <span class="check-box" aria-hidden="true"></span>
+          <span>Destacar links</span>
+        </label>
+      </div>
+
+      <button class="reset-button" id="reset" type="button">Restaurar aparência original</button>
+
+      <footer>Protótipo EasyWeb · 0.1.0-development</footer>
+    </main>
+    <script src="src/popup.js"></script>
+  </body>
+</html>

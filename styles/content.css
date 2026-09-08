@@ -1,0 +1,41 @@
+html.easyweb-enabled {
+  --easyweb-line-height: 1.4;
+  --easyweb-letter-spacing: 0px;
+}
+
+html.easyweb-enabled body,
+html.easyweb-enabled body :where(p, li, blockquote, label, button, input, textarea, select, option, a, h1, h2, h3, h4, h5, h6, td, th, figcaption, summary) {
+  line-height: var(--easyweb-line-height) !important;
+  letter-spacing: var(--easyweb-letter-spacing) !important;
+}
+
+html.easyweb-contrast,
+html.easyweb-contrast body {
+  background-color: #000 !important;
+  color: #fff !important;
+}
+
+html.easyweb-contrast body :where(p, li, blockquote, label, button, input, textarea, select, option, a, h1, h2, h3, h4, h5, h6, td, th, figcaption, summary) {
+  color: #fff !important;
+  background-color: transparent !important;
+}
+
+html.easyweb-contrast body a {
+  color: #63e6ff !important;
+}
+
+html.easyweb-contrast body :where(button, input, textarea, select) {
+  border-color: #fff !important;
+}
+
+html.easyweb-links body a {
+  text-decoration: underline !important;
+  text-decoration-thickness: 2px !important;
+  text-underline-offset: 0.15em !important;
+}
+
+html.easyweb-links body a:focus,
+html.easyweb-links body a:hover {
+  outline: 3px solid #ffbf47 !important;
+  outline-offset: 2px !important;
+}
