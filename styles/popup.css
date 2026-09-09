@@ -13,10 +13,12 @@ body {
   width: 340px;
   min-height: 500px;
   margin: 0;
+  border-top: 4px solid #16ad9d;
   background: #f7faf9;
 }
 
 .panel {
+  overflow: hidden;
   padding: 20px;
 }
 
@@ -38,6 +40,7 @@ body {
   color: white;
   font-size: 24px;
   font-weight: 800;
+  box-shadow: 3px 3px 0 #ffbf47;
 }
 
 h1,
@@ -74,6 +77,52 @@ h1 {
   font-size: 12px;
 }
 
+.status-row > span:last-child {
+  min-width: 0;
+}
+
+.scope-card {
+  margin: 2px 0 16px;
+  padding: 12px 13px;
+  border: 1px solid #b9dcd5;
+  border-left: 4px solid #16ad9d;
+  border-radius: 7px;
+  background: #eef8f5;
+}
+
+.scope-eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: #078b7e;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.scope-card strong,
+.scope-card small {
+  display: block;
+}
+
+.scope-card strong {
+  color: #1f3934;
+  font-size: 12px;
+}
+
+.scope-card small {
+  margin-top: 3px;
+  color: #5c706c;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.profile-name {
+  display: block;
+  margin-top: 3px;
+  color: #78918c;
+  font-size: 10px;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -97,6 +146,10 @@ h1 {
   cursor: pointer;
 }
 
+.switch-row > span:first-child {
+  min-width: 0;
+}
+
 .switch-row strong,
 .switch-row small {
   display: block;
@@ -111,6 +164,35 @@ h1 {
   margin-top: 3px;
   color: #70827e;
   font-size: 11px;
+}
+
+.fast-mode-row {
+  align-items: flex-start;
+}
+
+.experimental-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #ffefc8;
+  color: #705000;
+  font-size: 9px;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+.fast-mode-status {
+  color: #078b7e !important;
+}
+
+.fast-mode-row:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.fast-mode-row:has(input:disabled) strong,
+.fast-mode-row:has(input:disabled) small {
+  color: #8b9c98;
 }
 
 .switch-row input,
@@ -147,6 +229,22 @@ h1 {
   background: #16ad9d;
 }
 
+.switch-row input:disabled + .switch {
+  background: #c7d2cf;
+}
+
+.switch-row input:disabled + .switch::after {
+  background: #edf1f0;
+}
+
+.switch-row:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.switch-row:has(input:disabled) > span:first-child {
+  opacity: 0.68;
+}
+
 .switch-row input:checked + .switch::after {
   transform: translateX(16px);
 }
@@ -154,7 +252,38 @@ h1 {
 .controls {
   display: grid;
   gap: 17px;
-  padding: 20px 0 18px;
+  padding: 14px 0 18px;
+}
+
+.local-settings {
+  border-top: 1px solid #dce8e5;
+}
+
+.local-settings-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 16px;
+}
+
+.local-settings-heading h2 {
+  margin: 0;
+  color: #1f3934;
+  font-size: 13px;
+}
+
+.local-settings-heading p {
+  margin: 0;
+  color: #70827e;
+  font-size: 10px;
+  text-align: right;
+}
+
+.switch-row input:focus-visible + .switch,
+.check-row input:focus-visible + .check-box {
+  outline: 2px solid #078b7e;
+  outline-offset: 3px;
 }
 
 .control {
@@ -188,8 +317,35 @@ input[type="range"] {
 .options {
   display: grid;
   gap: 12px;
+  padding: 16px 0 18px;
+  border-top: 1px solid #dce8e5;
+}
+
+.filter-control {
   padding: 16px 0;
   border-top: 1px solid #dce8e5;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid #b9d3cd;
+  border-radius: 6px;
+  background: white;
+  color: #29443e;
+  font: inherit;
+  font-size: 12px;
+}
+
+select:focus-visible {
+  border-color: #16ad9d;
+  outline: 2px solid rgb(22 173 157 / 25%);
+  outline-offset: 1px;
 }
 
 .check-row {
@@ -246,9 +402,47 @@ input[type="range"] {
   outline: none;
 }
 
+.restore-profile-row {
+  align-items: flex-start;
+}
+
+.restore-profile-row strong {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.restore-profile-row .switch {
+  margin-top: 2px;
+}
+
+.fast-mode-row .switch {
+  margin-top: 2px;
+}
+
+.settings-button {
+  width: 100%;
+  min-height: 32px;
+  margin-top: 9px;
+  border: 0;
+  background: transparent;
+  color: #176e64;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-button:hover,
+.settings-button:focus-visible {
+  color: #0b574f;
+  outline: 2px solid rgb(22 173 157 / 25%);
+  outline-offset: 2px;
+}
+
 footer {
   padding-top: 18px;
   color: #8aa09c;
-  font-size: 10px;
+  font-size: 9px;
+  line-height: 1.35;
   text-align: center;
 }

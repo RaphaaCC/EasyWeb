@@ -8,8 +8,13 @@
     "default_title": "EasyWeb",
     "default_popup": "popup.html"
   },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "src/background.js"
+  },
   "permissions": [
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -19,10 +24,26 @@
       "matches": [
         "<all_urls>"
       ],
+      "js": [
+        "src/handlers/fast-style-bootstrap.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
       "css": [
         "styles/content.css"
       ],
       "js": [
+        "src/handlers/settings-handler.js",
+        "src/handlers/color-filter-handler.js",
+        "src/handlers/fast-mode-handler.js",
+        "src/handlers/contrast-handler.js",
+        "src/handlers/link-handler.js",
+        "src/handlers/accessibility-handler.js",
+        "src/handlers/notification-handler.js",
         "src/content.js"
       ],
       "run_at": "document_idle"

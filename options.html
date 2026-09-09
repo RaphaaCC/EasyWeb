@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Configurações | EasyWeb</title>
+    <link rel="stylesheet" href="styles/options.css">
+  </head>
+  <body>
+    <main class="options-shell">
+      <header class="page-header">
+        <div class="brand-mark" aria-hidden="true">E</div>
+        <div>
+          <p class="eyebrow">Configurações da extensão</p>
+          <h1>Perfil global de acessibilidade</h1>
+          <p class="lead">Este é o padrão aplicado automaticamente nos sites sem personalização própria.</p>
+        </div>
+      </header>
+
+      <section class="profile-section" aria-labelledby="profiles-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="profiles-title">Perfil padrão</h2>
+            <p>O popup pode criar ajustes apenas para um site, sem alterar este perfil.</p>
+          </div>
+          <span class="save-status" id="save-status" role="status" aria-live="polite"></span>
+        </div>
+        <div class="profile-grid" id="profile-grid"></div>
+      </section>
+
+      <section class="filter-section" id="color-filter-section" aria-labelledby="filter-title">
+        <div>
+          <h2 id="filter-title">Filtro para daltonismo</h2>
+          <p>Quando ativo, ele substitui o filtro local e o filtro do perfil em todos os sites.</p>
+        </div>
+        <label class="switch-row" for="daltonic-filter-enabled">
+          <span>
+            <strong>Filtro universal</strong>
+            <small>Aplicar em todos os sites</small>
+          </span>
+          <input id="daltonic-filter-enabled" type="checkbox">
+          <span class="switch" aria-hidden="true"></span>
+        </label>
+        <label class="field" id="daltonic-filter-control" for="daltonic-filter" hidden>
+          <span>Tipo de filtro ativo</span>
+          <select id="daltonic-filter">
+            <option value="protanopia">Protanopia</option>
+            <option value="protanomaly">Protanomalia</option>
+            <option value="deuteranopia">Deuteranopia</option>
+            <option value="deuteranomaly">Deuteranomalia</option>
+            <option value="tritanopia">Tritanopia</option>
+            <option value="tritanomaly">Tritanomalia</option>
+            <option value="achromatopsia">Acromatopsia</option>
+            <option value="achromatomaly">Acromatomalia</option>
+            <option value="blue-cone-monochromacy">Monocromacia de cones azuis</option>
+          </select>
+        </label>
+      </section>
+
+      <footer>2026 EasyWeb © Todos os Direitos Reservados | 0.1.0-development</footer>
+    </main>
+    <script src="src/handlers/settings-handler.js"></script>
+    <script src="src/options.js"></script>
+  </body>
+</html>

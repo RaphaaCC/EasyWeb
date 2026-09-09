@@ -19,7 +19,16 @@
 
       <section class="status-row" aria-live="polite">
         <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Pronto para ajustar esta página</span>
+        <span>
+          <span id="status-text">Pronto para ajustar esta página</span>
+          <small id="profile-name">Perfil global: Padrão</small>
+        </span>
+      </section>
+
+      <section class="scope-card" aria-live="polite">
+        <span class="scope-eyebrow">Escopo atual</span>
+        <strong id="scope-title">Este site usa o perfil global</strong>
+        <small id="scope-description">Os ajustes abaixo criarão uma personalização apenas para este site.</small>
       </section>
 
       <label class="switch-row" for="enabled">
@@ -31,7 +40,12 @@
         <span class="switch" aria-hidden="true"></span>
       </label>
 
-      <div class="controls">
+      <section class="local-settings" aria-labelledby="local-settings-title">
+        <div class="local-settings-heading">
+          <h2 id="local-settings-title">Personalização deste site</h2>
+          <p>Não altera o perfil global.</p>
+        </div>
+        <div class="controls">
         <label class="control" for="font-scale">
           <span class="control-heading">
             <span>Tamanho do texto</span>
@@ -55,9 +69,9 @@
           </span>
           <input id="letter-spacing" type="range" min="0" max="3" step="0.5" value="0">
         </label>
-      </div>
+        </div>
 
-      <div class="options">
+        <div class="options">
         <label class="check-row" for="contrast">
           <input id="contrast" type="checkbox">
           <span class="check-box" aria-hidden="true"></span>
@@ -68,12 +82,61 @@
           <span class="check-box" aria-hidden="true"></span>
           <span>Destacar links</span>
         </label>
-      </div>
+        </div>
+      </section>
 
-      <button class="reset-button" id="reset" type="button">Restaurar aparência original</button>
+      <label class="switch-row" for="color-filter-enabled">
+        <span>
+          <strong>Filtro para daltonismo</strong>
+          <small id="color-filter-scope">Aplicar nesta página</small>
+        </span>
+        <input id="color-filter-enabled" type="checkbox">
+        <span class="switch" aria-hidden="true"></span>
+      </label>
 
-      <footer>Protótipo EasyWeb · 0.1.0-development</footer>
+      <label class="switch-row fast-mode-row" for="fast-mode">
+        <span>
+          <strong>Carregamento Rápido <span class="experimental-badge">Experimental</span></strong>
+          <small id="fast-mode-description">Manipula o cache do CSS para o plugin não precisar ficar agindo a todo momento automaticamente.</small>
+          <small class="fast-mode-status" id="fast-mode-status" role="status">Verificando a estabilidade desta página.</small>
+        </span>
+        <input id="fast-mode" type="checkbox" disabled aria-describedby="fast-mode-description fast-mode-status">
+        <span class="switch" aria-hidden="true"></span>
+      </label>
+
+      <label class="control filter-control" id="color-filter-type-control" for="color-filter-type" hidden>
+        <span class="control-heading">
+          <span>Tipo de filtro</span>
+        </span>
+        <select id="color-filter-type">
+          <option value="protanopia">Protanopia</option>
+          <option value="protanomaly">Protanomalia</option>
+          <option value="deuteranopia">Deuteranopia</option>
+          <option value="deuteranomaly">Deuteranomalia</option>
+          <option value="tritanopia">Tritanopia</option>
+          <option value="tritanomaly">Tritanomalia</option>
+          <option value="achromatopsia">Acromatopsia</option>
+          <option value="achromatomaly">Acromatomalia</option>
+          <option value="blue-cone-monochromacy">Monocromacia de cones azuis</option>
+        </select>
+      </label>
+
+      <label class="switch-row restore-profile-row" for="restore-global-profile">
+        <span>
+          <strong id="restore-global-label">Restaurar usando o perfil global (Padrão)</strong>
+          <small>Desative para manter este site sem ajustes.</small>
+        </span>
+        <input id="restore-global-profile" type="checkbox" checked>
+        <span class="switch" aria-hidden="true"></span>
+      </label>
+
+      <button class="reset-button" id="reset" type="button">Voltar ao perfil global neste site</button>
+
+      <button class="settings-button" id="open-options" type="button">Mais configurações</button>
+
+      <footer>2026 EasyWeb © Todos os Direitos Reservados | 0.1.0-development</footer>
     </main>
+    <script src="src/handlers/page-handler.js"></script>
     <script src="src/popup.js"></script>
   </body>
 </html>

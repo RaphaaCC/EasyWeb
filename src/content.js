@@ -1,146 +1,244 @@
 (() => {
-  if (window.__easyWebController) {
+  const hasExtensionContext = globalThis.chrome?.runtime?.onMessage &&
+    globalThis.chrome?.storage?.local;
+  const hasHandlers = globalThis.EasyWebSettingsHandler &&
+    globalThis.EasyWebAccessibilityHandler &&
+    globalThis.EasyWebFastModeHandler &&
+    globalThis.EasyWebNotificationHandler;
+
+  if (window.__easyWebController || window.__easyWebInitializing || !hasExtensionContext || !hasHandlers) {
     return;
   }
 
-  const DEFAULTS = Object.freeze({
-    enabled: true,
-    fontScale: 1,
-    lineHeight: 1.4,
-    letterSpacing: 0,
-    contrast: false,
-    highlightLinks: false
+  window.__easyWebInitializing = true;
+
+  const settingsApi = EasyWebSettingsHandler;
+  const settings = settingsApi.create(window.location);
+  const accessibility = EasyWebAccessibilityHandler.create(settingsApi);
+  const fastMode = EasyWebFastModeHandler.create(window.location);
+  const notification = EasyWebNotificationHandler;
+  let currentConfig;
+  let resolveReady;
+  const ready = new Promise((resolve) => {
+    resolveReady = resolve;
   });
 
-  const state = { ...DEFAULTS };
-  const fontRecords = new Map();
-  let observer;
-
-  function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-  }
-
-  function normalizeSettings(settings = {}) {
-    return {
-      enabled: Boolean(settings.enabled),
-      fontScale: clamp(Number(settings.fontScale) || DEFAULTS.fontScale, 0.8, 1.6),
-      lineHeight: clamp(Number(settings.lineHeight) || DEFAULTS.lineHeight, 1, 2.2),
-      letterSpacing: clamp(Number(settings.letterSpacing) || 0, 0, 3),
-      contrast: Boolean(settings.contrast),
-      highlightLinks: Boolean(settings.highlightLinks)
-    };
-  }
-
-  function hasDirectText(element) {
-    return Array.from(element.childNodes).some((node) =>
-      node.nodeType === Node.TEXT_NODE && node.nodeValue.trim().length > 0
-    );
-  }
-
-  function getTextElements() {
-    if (!document.body) {
-      return [];
-    }
-
-    return [document.body, ...document.body.querySelectorAll("*")].filter((element) => {
-      const tag = element.tagName.toLowerCase();
-      return hasDirectText(element) && !["script", "style", "noscript"].includes(tag);
-    });
-  }
-
-  function rememberFontSizes(elements) {
-    const newRecords = [];
-
-    for (const element of elements) {
-      if (fontRecords.has(element)) {
-        continue;
-      }
-
-      const computedSize = Number.parseFloat(getComputedStyle(element).fontSize);
-      if (!Number.isFinite(computedSize)) {
-        continue;
-      }
-
-      const record = {
-        originalInlineSize: element.style.fontSize,
-        baseSize: computedSize / (state.fontScale || 1)
-      };
-      fontRecords.set(element, record);
-      newRecords.push([element, record]);
-    }
-
-    return newRecords;
-  }
-
-  function applyFontScale() {
-    const records = rememberFontSizes(getTextElements());
-
-    for (const [element, record] of records) {
-      element.style.fontSize = `${record.baseSize * state.fontScale}px`;
-    }
-
-    for (const [element, record] of fontRecords) {
-      if (element.isConnected) {
-        element.style.fontSize = `${record.baseSize * state.fontScale}px`;
-      } else {
-        fontRecords.delete(element);
-      }
-    }
-  }
-
-  function restoreFontSizes() {
-    for (const [element, record] of fontRecords) {
-      if (element.isConnected) {
-        element.style.fontSize = record.originalInlineSize;
-      }
-    }
-    fontRecords.clear();
-  }
-
-  function applyState(nextSettings) {
-    Object.assign(state, normalizeSettings(nextSettings));
-    const root = document.documentElement;
-
-    root.classList.toggle("easyweb-enabled", state.enabled);
-    root.classList.toggle("easyweb-contrast", state.enabled && state.contrast);
-    root.classList.toggle("easyweb-links", state.enabled && state.highlightLinks);
-    root.style.setProperty("--easyweb-line-height", state.lineHeight);
-    root.style.setProperty("--easyweb-letter-spacing", `${state.letterSpacing}px`);
-
-    if (state.enabled) {
-      applyFontScale();
+  const cachedPayload = fastMode.readCachedPayload();
+  let cacheInUse = Boolean(cachedPayload && fastMode.hasMatchingFingerprint(cachedPayload));
+  if (cacheInUse) {
+    cacheInUse = fastMode.applyCachedElementCss(cachedPayload);
+    if (cacheInUse) {
+      accessibility.applyCachedStyles(cachedPayload.settings);
     } else {
-      restoreFontSizes();
+      fastMode.clearCache();
+    }
+  } else {
+    fastMode.removeBootstrapStyles();
+    if (cachedPayload) {
+      fastMode.clearCache();
     }
   }
 
-  function startObserver() {
-    if (!document.body || observer) {
+  function matchesCachedSettings(settings) {
+    return cacheInUse && settings.fastMode &&
+      JSON.stringify(settingsApi.normalize(settings)) ===
+      JSON.stringify(settingsApi.normalize(cachedPayload.settings));
+  }
+
+  function applyConfig(config) {
+    currentConfig = config;
+    const fastModeStatus = fastMode.getStatus();
+    const canReuseCache = matchesCachedSettings(config.settings) && fastModeStatus.state !== "blocked";
+
+    if (cacheInUse && !canReuseCache) {
+      fastMode.removeBootstrapStyles();
+      accessibility.clearCachedStyles();
+      fastMode.clearCache();
+      cacheInUse = false;
+    }
+
+    const effectiveSettings = {
+      ...config.settings,
+      fastMode: config.settings.fastMode && (fastModeStatus.eligible || canReuseCache)
+    };
+    const appliedSettings = accessibility.apply(effectiveSettings);
+    accessibility.setFastMode(appliedSettings.fastMode);
+
+    if (appliedSettings.fastMode) {
+      fastMode.startSafetyWatch();
+    } else {
+      fastMode.stopSafetyWatch();
+    }
+
+    if (fastModeStatus.state === "eligible" && appliedSettings.fastMode && !cacheInUse) {
+      fastMode.cacheCompiledCss(appliedSettings, accessibility.getCachedCss());
+    }
+
+    if (fastModeStatus.state === "blocked") {
+      fastMode.clearCache();
+    }
+
+    return appliedSettings;
+  }
+
+  fastMode.onStatusChange((status) => {
+    if (!currentConfig) {
       return;
     }
 
-    observer = new MutationObserver(() => {
-      if (state.enabled && state.fontScale !== 1) {
-        applyFontScale();
+    if (status.eligible && currentConfig.settings.fastMode) {
+      applyConfig(currentConfig);
+      return;
+    }
+
+    if (status.state === "blocked") {
+      const needsFallback = cacheInUse || accessibility.getState().fastMode;
+      fastMode.clearCache();
+      if (cacheInUse) {
+        fastMode.removeBootstrapStyles();
+        accessibility.clearCachedStyles();
+        cacheInUse = false;
       }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
-
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === "easyweb:get-state") {
-      sendResponse({ settings: { ...state } });
+      if (needsFallback) {
+        applyConfig({
+          ...currentConfig,
+          settings: { ...currentConfig.settings, fastMode: false }
+        });
+      }
     }
-
-    if (message.type === "easyweb:apply-state") {
-      applyState(message.settings);
-      sendResponse({ settings: { ...state } });
-    }
-
-    return false;
   });
 
-  window.__easyWebController = { applyState };
-  applyState(state);
-  startObserver();
+  async function loadConfig() {
+    const config = await settings.load();
+    applyConfig(config);
+    return config;
+  }
+
+  async function initialize() {
+    try {
+      const config = await loadConfig();
+      accessibility.startObserver();
+
+      if (config.settings.enabled && (config.profileId !== "default" || config.hasSiteOverride)) {
+        notification.showOnce();
+      }
+    } catch (error) {
+      const fallback = {
+        profileId: "default",
+        profile: settingsApi.getProfile("default"),
+        hasSiteOverride: false,
+        settings: settingsApi.DEFAULTS
+      };
+      applyConfig(fallback);
+      accessibility.startObserver();
+    } finally {
+      resolveReady();
+    }
+  }
+
+  chrome.storage.onChanged?.addListener(async (changes, areaName) => {
+    const siteSettingsChanged = Object.keys(changes).some((key) => settings.isSiteStorageKey(key));
+
+    if (areaName !== "local" || !siteSettingsChanged) {
+      return;
+    }
+
+    try {
+      applyConfig(await settings.load());
+    } catch (error) {
+      // The current page keeps its last valid configuration if storage is unavailable.
+    }
+  });
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    (async () => {
+      try {
+        await ready;
+        if (!message?.type) {
+          return;
+        }
+
+        if (message.type === "easyweb:get-state") {
+          sendResponse({
+            settings: accessibility.getState(),
+            profileId: currentConfig.profileId,
+            profileLabel: currentConfig.profile.label,
+            hasSiteOverride: currentConfig.hasSiteOverride,
+            universalFilter: currentConfig.universalFilter,
+            fastModeStatus: fastMode.getStatus()
+          });
+          return;
+        }
+
+        if (message.type === "easyweb:refresh-config") {
+          const config = await settings.load();
+          const appliedSettings = applyConfig(config);
+          sendResponse({ settings: appliedSettings, fastModeStatus: fastMode.getStatus() });
+          return;
+        }
+
+        if (message.type === "easyweb:apply-state") {
+          const appliedSettings = applyConfig({
+            ...currentConfig,
+            settings: message.settings
+          });
+          const savedSettings = await settings.saveSiteOverride(appliedSettings);
+          currentConfig = {
+            ...currentConfig,
+            hasSiteOverride: true,
+            settings: savedSettings
+          };
+          sendResponse({
+            settings: savedSettings,
+            hasSiteOverride: true,
+            universalFilter: currentConfig.universalFilter,
+            fastModeStatus: fastMode.getStatus()
+          });
+          return;
+        }
+
+        if (message.type === "easyweb:reset-state") {
+          if (message.mode === "global") {
+            const config = await settings.resetSiteOverride();
+            const appliedSettings = applyConfig(config);
+            sendResponse({
+              settings: appliedSettings,
+              hasSiteOverride: currentConfig.hasSiteOverride,
+              universalFilter: currentConfig.universalFilter,
+              fastModeStatus: fastMode.getStatus()
+            });
+            return;
+          }
+
+          const originalSettings = await settings.saveSiteOverride({
+            ...settingsApi.DEFAULTS,
+            enabled: false
+          });
+          currentConfig = {
+            ...currentConfig,
+            hasSiteOverride: true,
+            settings: originalSettings
+          };
+          const appliedSettings = applyConfig(currentConfig);
+          sendResponse({
+            settings: appliedSettings,
+            hasSiteOverride: true,
+            universalFilter: currentConfig.universalFilter,
+            fastModeStatus: fastMode.getStatus()
+          });
+        }
+      } catch (error) {
+        sendResponse({ error: "Não foi possível aplicar os ajustes nesta página." });
+      }
+    })();
+
+    return true;
+  });
+
+  window.__easyWebController = {
+    applyState: accessibility.apply,
+    getState: accessibility.getState
+  };
+
+  initialize();
 })();
