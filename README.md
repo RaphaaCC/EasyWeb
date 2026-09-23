@@ -2,6 +2,11 @@
 
 > Tornando a Web mais democratica e acessivel para todos.
 
+![Version](https://img.shields.io/badge/version-0.1.0--development-00a99d?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-2563eb?style=flat-square)
+![Chrome Extension](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)
+
 EasyWeb e uma plataforma open source de acessibilidade para a Web. O
 repositorio contem uma extensao para Google Chrome e uma API Node.js que apoia
 o modo adaptativo opcional.
