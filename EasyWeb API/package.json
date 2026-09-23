@@ -1,0 +1,26 @@
+{
+  "name": "easyweb-api",
+  "version": "0.1.0-development",
+  "private": true,
+  "description": "API REST para os recursos de acessibilidade da EasyWeb.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:sync": "node src/scripts/migrate.js",
+    "db:migrate": "npm run db:sync",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "^2.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "mysql2": "^3.14.4",
+    "ws": "^8.18.3"
+  }
+}

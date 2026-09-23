@@ -1,0 +1,17 @@
+# Dependencies and test artifacts
+**/node_modules/
+**/coverage/
+**/npm-debug.log*
+
+# Local configuration and secrets
+**/.env
+!**/.env.example
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+*.swp
+
+# Generated presentation review artifacts
+easyweb-slide*.png
+EasyWeb.pptx

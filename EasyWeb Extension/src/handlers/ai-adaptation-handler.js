@@ -1,0 +1,267 @@
+(() => {
+  const HANDLER_VERSION = 2;
+  const SITE_SCRIPT_VERSION = 1;
+  const MAX_STEPS = 8;
+  const ALLOWED_TRIGGERS = new Set(["document-ready", "route-change"]);
+  const ALLOWED_SCOPES = new Set(["main-content", "interactive-elements", "links", "controls", "document"]);
+  const ALLOWED_PRESETS = new Set([
+    "readable-text",
+    "reading-spacing",
+    "focus-ring",
+    "link-clarity",
+    "control-boundaries",
+    "contrast-support",
+    "reduced-motion",
+    "large-controls",
+    "content-width"
+  ]);
+  const STYLE_IDS = Object.freeze({
+    base: "easyweb-ai-base-style",
+    personal: "easyweb-ai-personal-style"
+  });
+  const activeCompiled = { base: null, personal: null };
+  let retentionObserver;
+  let retainedHead;
+  let retentionQueued = false;
+  const SELECTORS = Object.freeze({
+    "main-content": ":where(main, article, [role=\"main\"])",
+    "interactive-elements": ":where(a[href], button, input, select, textarea, summary, [role=\"button\"], [role=\"link\"])",
+    links: ":where(a[href])",
+    controls: ":where(button, input, select, textarea, summary, [role=\"button\"], [role=\"checkbox\"], [role=\"tab\"])",
+    document: ":root"
+  });
+
+  function clamp(value, minimum, maximum, fallback = minimum) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.min(Math.max(number, minimum), maximum) : fallback;
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function isPlanExpired(plan) {
+    return Boolean(plan?.expiresAt) && Number.isFinite(Date.parse(plan.expiresAt)) && Date.parse(plan.expiresAt) <= Date.now();
+  }
+
+  function normalizeParameters(preset, value) {
+    const parameters = isPlainObject(value) ? value : {};
+    if (preset === "readable-text") return { scale: clamp(parameters.scale, 0.9, 1.35, 1.15) };
+    if (preset === "reading-spacing") {
+      return {
+        lineHeight: clamp(parameters.lineHeight, 1.35, 2, 1.6),
+        letterSpacing: clamp(parameters.letterSpacing, 0, 2, 0.3)
+      };
+    }
+    if (preset === "focus-ring") {
+      return { width: clamp(parameters.width, 2, 4, 3), offset: clamp(parameters.offset, 1, 5, 3) };
+    }
+    if (preset === "control-boundaries") return { width: clamp(parameters.width, 1, 3, 2) };
+    if (preset === "large-controls") return { minimumSize: clamp(parameters.minimumSize, 36, 48, 40) };
+    if (preset === "content-width") return { maxWidth: clamp(parameters.maxWidth, 42, 90, 68) };
+    return {};
+  }
+
+  function legacyActionsToSiteScript(actions) {
+    const steps = (Array.isArray(actions) ? actions : []).slice(0, MAX_STEPS).flatMap((action) => {
+      if (!isPlainObject(action) || !ALLOWED_SCOPES.has(action.scope)) return [];
+      const parameters = isPlainObject(action.parameters) ? action.parameters : {};
+      const directPreset = {
+        "set-text-scale": "readable-text",
+        "set-reading-spacing": "reading-spacing",
+        "improve-focus-ring": "focus-ring",
+        "improve-link-distinction": "link-clarity",
+        "improve-control-boundaries": "control-boundaries",
+        "raise-insufficient-contrast": "contrast-support",
+        "reduce-motion": "reduced-motion",
+        "increase-hit-targets": "large-controls"
+      }[action.type];
+      if (directPreset) return [{ type: "apply-style", target: action.scope, preset: directPreset, parameters }];
+      if (action.type !== "css-adjustment" || !Array.isArray(parameters.rules)) return [];
+      return parameters.rules.slice(0, 4).flatMap((rule) => {
+        if (!isPlainObject(rule)) return [];
+        const preset = {
+          "font-size-scale": "readable-text",
+          "line-height": "reading-spacing",
+          "letter-spacing": "reading-spacing",
+          "max-reading-width": "content-width"
+        }[rule.property];
+        if (!preset) return [];
+        const converted = rule.property === "font-size-scale" ? { scale: rule.value }
+          : rule.property === "line-height" ? { lineHeight: rule.value }
+            : rule.property === "letter-spacing" ? { letterSpacing: rule.value }
+              : { maxWidth: rule.value };
+        return [{ type: "apply-style", target: action.scope, preset, parameters: converted }];
+      });
+    });
+    return { version: SITE_SCRIPT_VERSION, triggers: ["document-ready"], steps };
+  }
+
+  function normalizeSiteScript(value, legacyActions) {
+    const source = isPlainObject(value) ? value : legacyActionsToSiteScript(legacyActions);
+    if (source.version !== SITE_SCRIPT_VERSION) return null;
+    const triggers = [...new Set((Array.isArray(source.triggers) ? source.triggers : [])
+      .filter((trigger) => ALLOWED_TRIGGERS.has(trigger)))];
+    if (!triggers.includes("document-ready")) triggers.unshift("document-ready");
+    const steps = (Array.isArray(source.steps) ? source.steps : []).slice(0, MAX_STEPS).flatMap((step) => {
+      if (!isPlainObject(step) || step.type !== "apply-style" ||
+        !ALLOWED_SCOPES.has(step.target) || !ALLOWED_PRESETS.has(step.preset)) return [];
+      return [{
+        type: "apply-style",
+        target: step.target,
+        preset: step.preset,
+        parameters: normalizeParameters(step.preset, step.parameters)
+      }];
+    });
+    return { version: SITE_SCRIPT_VERSION, triggers: triggers.slice(0, 2), steps };
+  }
+
+  function validatePlan(plan, origin = window.location.origin) {
+    if (!isPlainObject(plan) || plan.schemaVersion !== 1 || plan.origin !== origin || isPlanExpired(plan)) return null;
+    if ((plan.planScope !== "base" && plan.planScope !== "personal") || typeof plan.planId !== "string" || !plan.planId) return null;
+    const siteScript = normalizeSiteScript(plan.siteScript, plan.actions);
+    return siteScript ? { ...plan, siteScript } : null;
+  }
+
+  function selectorFor(scope) {
+    return SELECTORS[scope] || SELECTORS.document;
+  }
+
+  function compileStep(step) {
+    const selector = selectorFor(step.target);
+    const p = step.parameters;
+    switch (step.preset) {
+      case "readable-text":
+        return `${selector} { font-size: calc(1em * ${p.scale}) !important; }`;
+      case "reading-spacing":
+        return `${selector} { line-height: ${p.lineHeight} !important; letter-spacing: ${p.letterSpacing}px !important; }`;
+      case "focus-ring":
+        return `${SELECTORS["interactive-elements"]}:focus-visible { outline: ${p.width}px solid #005fcc !important; outline-offset: ${p.offset}px !important; }`;
+      case "link-clarity":
+        return `${SELECTORS.links} { text-decoration-line: underline !important; text-decoration-thickness: max(2px, 0.12em) !important; text-underline-offset: 0.16em !important; }`;
+      case "control-boundaries":
+        return `${SELECTORS.controls} { border: ${p.width}px solid currentColor !important; }`;
+      case "contrast-support":
+        return `${SELECTORS["main-content"]} :where(p, li, dt, dd, th, td, label) { text-shadow: 0 0 0.01px currentColor; }`;
+      case "reduced-motion":
+        return ":where(*, *::before, *::after) { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }";
+      case "large-controls":
+        return `${SELECTORS.controls} { min-height: ${p.minimumSize}px !important; min-width: ${p.minimumSize}px !important; }`;
+      case "content-width":
+        return `${SELECTORS["main-content"]} { max-width: ${p.maxWidth}ch !important; }`;
+      default:
+        return "";
+    }
+  }
+
+  function compilePlan(plan) {
+    const validPlan = validatePlan(plan);
+    if (!validPlan) return null;
+    const css = validPlan.siteScript.steps.map(compileStep).filter(Boolean).join("\n");
+    if (css.length > 12_000) return null;
+    return {
+      css: `@layer easyweb-ai-${validPlan.planScope} {\n${css}\n}`,
+      handlerVersion: HANDLER_VERSION,
+      planId: validPlan.planId,
+      planScope: validPlan.planScope,
+      siteScriptVersion: SITE_SCRIPT_VERSION
+    };
+  }
+
+  function installCompiledStyle(scope, compiled) {
+    const style = document.getElementById(STYLE_IDS[scope]) || document.createElement("style");
+    style.id = STYLE_IDS[scope];
+    style.dataset.easywebAiPlan = compiled.planId;
+    style.dataset.easywebSiteScript = String(SITE_SCRIPT_VERSION);
+    style.textContent = compiled.css;
+    if (!style.isConnected) (document.head || document.documentElement).append(style);
+    return style;
+  }
+
+  function retainActiveStyles() {
+    retentionQueued = false;
+    startRetention();
+    for (const scope of Object.keys(activeCompiled)) {
+      const compiled = activeCompiled[scope];
+      if (!compiled) continue;
+      const style = document.getElementById(STYLE_IDS[scope]);
+      if (!style || style.dataset?.easywebAiPlan !== compiled.planId || style.textContent !== compiled.css) {
+        installCompiledStyle(scope, compiled);
+      }
+    }
+  }
+
+  function scheduleRetention() {
+    if (retentionQueued) return;
+    retentionQueued = true;
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(retainActiveStyles);
+      return;
+    }
+    Promise.resolve().then(retainActiveStyles);
+  }
+
+  function startRetention() {
+    if (typeof MutationObserver !== "function" || !document.documentElement) return;
+    if (retentionObserver && retainedHead === document.head) return;
+    retentionObserver?.disconnect();
+    retentionObserver = new MutationObserver(scheduleRetention);
+    retentionObserver.observe(document.documentElement, { childList: true });
+    if (document.head && document.head !== document.documentElement) {
+      retentionObserver.observe(document.head, { childList: true });
+    }
+    retainedHead = document.head;
+  }
+
+  function stopRetention() {
+    retentionObserver?.disconnect();
+    retentionObserver = undefined;
+    retainedHead = undefined;
+    retentionQueued = false;
+  }
+
+  function remove(scope) {
+    activeCompiled[scope] = null;
+    document.getElementById(STYLE_IDS[scope])?.remove();
+    if (!activeCompiled.base && !activeCompiled.personal) stopRetention();
+  }
+
+  function apply(plan) {
+    const compiled = compilePlan(plan);
+    if (!compiled) return { applied: false, reason: "invalid-plan" };
+    activeCompiled[compiled.planScope] = compiled;
+    installCompiledStyle(compiled.planScope, compiled);
+    startRetention();
+    return { applied: true, compiled };
+  }
+
+  function applyCached(plan, cached) {
+    const validPlan = validatePlan(plan);
+    if (!validPlan || !isPlainObject(cached) || cached.handlerVersion !== HANDLER_VERSION ||
+      cached.siteScriptVersion !== SITE_SCRIPT_VERSION || typeof cached.css !== "string" || cached.css.length > 12_000 ||
+      !cached.css.startsWith(`@layer easyweb-ai-${validPlan.planScope} {`)) {
+      return { applied: false, reason: "invalid-cache" };
+    }
+    const compiled = { ...cached, planId: validPlan.planId, planScope: validPlan.planScope };
+    activeCompiled[validPlan.planScope] = compiled;
+    installCompiledStyle(validPlan.planScope, compiled);
+    startRetention();
+    return { applied: true, compiled };
+  }
+
+  function clear() {
+    remove("base");
+    remove("personal");
+  }
+
+  globalThis.EasyWebAiAdaptationHandler = Object.freeze({
+    HANDLER_VERSION,
+    SITE_SCRIPT_VERSION,
+    validatePlan,
+    compilePlan,
+    apply,
+    applyCached,
+    remove,
+    clear
+  });
+})();

@@ -1,0 +1,153 @@
+html.easyweb-enabled {
+  --easyweb-line-height: 1.4;
+  --easyweb-letter-spacing: 0px;
+}
+
+html.easyweb-enabled body,
+html.easyweb-enabled body :where(p, li, blockquote, label, button, input, textarea, select, option, a, h1, h2, h3, h4, h5, h6, td, th, figcaption, summary) {
+  line-height: var(--easyweb-line-height) !important;
+  letter-spacing: var(--easyweb-letter-spacing) !important;
+}
+
+html.easyweb-enabled:where(
+  .easyweb-color-filter-protanopia,
+  .easyweb-color-filter-protanomaly,
+  .easyweb-color-filter-deuteranopia,
+  .easyweb-color-filter-deuteranomaly,
+  .easyweb-color-filter-tritanopia,
+  .easyweb-color-filter-tritanomaly,
+  .easyweb-color-filter-achromatopsia,
+  .easyweb-color-filter-achromatomaly,
+  .easyweb-color-filter-blue-cone-monochromacy
+) body {
+  filter: var(--easyweb-color-filter) !important;
+}
+
+html.easyweb-enabled.easyweb-color-filter-protanopia { --easyweb-color-filter: url("#easyweb-color-filter-protanopia"); }
+html.easyweb-enabled.easyweb-color-filter-protanomaly { --easyweb-color-filter: url("#easyweb-color-filter-protanomaly"); }
+html.easyweb-enabled.easyweb-color-filter-deuteranopia { --easyweb-color-filter: url("#easyweb-color-filter-deuteranopia"); }
+html.easyweb-enabled.easyweb-color-filter-deuteranomaly { --easyweb-color-filter: url("#easyweb-color-filter-deuteranomaly"); }
+html.easyweb-enabled.easyweb-color-filter-tritanopia { --easyweb-color-filter: url("#easyweb-color-filter-tritanopia"); }
+html.easyweb-enabled.easyweb-color-filter-tritanomaly { --easyweb-color-filter: url("#easyweb-color-filter-tritanomaly"); }
+html.easyweb-enabled.easyweb-color-filter-achromatopsia { --easyweb-color-filter: url("#easyweb-color-filter-achromatopsia"); }
+html.easyweb-enabled.easyweb-color-filter-achromatomaly { --easyweb-color-filter: url("#easyweb-color-filter-achromatomaly"); }
+html.easyweb-enabled.easyweb-color-filter-blue-cone-monochromacy { --easyweb-color-filter: url("#easyweb-color-filter-blue-cone-monochromacy"); }
+
+html.easyweb-enabled.easyweb-reduce-motion *,
+html.easyweb-enabled.easyweb-reduce-motion *::before,
+html.easyweb-enabled.easyweb-reduce-motion *::after {
+  animation-delay: 0ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-delay: 0ms !important;
+  transition-duration: 0.01ms !important;
+}
+
+html.easyweb-enabled.easyweb-reading-focus :is(article, [role="main"]) {
+  max-width: 76ch !important;
+  margin-inline: auto !important;
+}
+
+html.easyweb-enabled body[data-easyweb-contrast="dark"],
+html.easyweb-enabled body [data-easyweb-contrast="dark"] {
+  color: #000 !important;
+}
+
+html.easyweb-enabled body[data-easyweb-contrast="light"],
+html.easyweb-enabled body [data-easyweb-contrast="light"] {
+  color: #fff !important;
+}
+
+html.easyweb-enabled body[data-easyweb-control-contrast="dark"],
+html.easyweb-enabled body [data-easyweb-control-contrast="dark"] {
+  border-color: #000 !important;
+  color: #000 !important;
+}
+
+html.easyweb-enabled body[data-easyweb-control-contrast="light"],
+html.easyweb-enabled body [data-easyweb-control-contrast="light"] {
+  border-color: #fff !important;
+  color: #fff !important;
+}
+
+html.easyweb-enabled body [data-easyweb-control-outline="dark"] {
+  outline: 2px solid #000 !important;
+  outline-offset: -2px !important;
+}
+
+html.easyweb-enabled body [data-easyweb-control-outline="light"] {
+  outline: 2px solid #fff !important;
+  outline-offset: -2px !important;
+}
+
+html.easyweb-enabled body [data-easyweb-control-contrast="dark"]::placeholder {
+  color: #000 !important;
+  opacity: 1 !important;
+}
+
+html.easyweb-enabled body [data-easyweb-control-contrast="light"]::placeholder {
+  color: #fff !important;
+  opacity: 1 !important;
+}
+
+html.easyweb-links body a[data-easyweb-link] {
+  text-decoration: underline !important;
+  text-decoration-thickness: 2px !important;
+  text-underline-offset: 0.15em !important;
+  text-decoration-skip-ink: auto !important;
+}
+
+html.easyweb-links body a[data-easyweb-link]:hover,
+html.easyweb-links body a[data-easyweb-link]:focus-visible {
+  outline: 3px solid #ffbf47 !important;
+  outline-offset: 2px !important;
+  background-color: #ffbf47 !important;
+  color: #123c35 !important;
+  border-radius: 3px !important;
+}
+
+.easyweb-activation-notice {
+  all: initial;
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  top: 16px !important;
+  right: 16px !important;
+  max-width: min(360px, calc(100vw - 32px)) !important;
+  padding: 13px 16px !important;
+  border: 1px solid #0c8f82 !important;
+  border-radius: 8px !important;
+  background: #123c35 !important;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%) !important;
+  color: #fff !important;
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.35 !important;
+  letter-spacing: 0 !important;
+  opacity: 0;
+  pointer-events: none !important;
+  animation: easyweb-notice-in 180ms ease-out forwards, easyweb-notice-out 180ms ease-in 2.7s forwards;
+}
+
+@keyframes easyweb-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes easyweb-notice-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
