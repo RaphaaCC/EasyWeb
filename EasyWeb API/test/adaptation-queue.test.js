@@ -4,13 +4,13 @@ import { gzipSync } from "node:zlib";
 import { createAdaptationService } from "../src/handlers/adaptation-service-handler.js";
 import { createAdaptationJobWorker } from "../src/handlers/adaptation-job-worker.js";
 
-function snapshot(path, children) {
+function snapshot(path, children, scripts = { total: 1 }) {
   return {
     captureVersion: 1,
     page: { origin: "https://example.com", path },
     structure: { tree: { tag: "main", landmark: true, children } },
     styles: { styleSheetCount: 1 },
-    scripts: { total: 1 }
+    scripts
   };
 }
 
@@ -26,23 +26,28 @@ function row(contentHash, value, pathMarker, installationMarker, createdAt = "20
   };
 }
 
-function validRows({ sameInstallation = false } = {}) {
+function validRows({ sameInstallation = false, scripts } = {}) {
   return [
-    row("a", snapshot("/", [{ tag: "h1", headingLevel: 1 }]), 1, 1),
-    row("b", snapshot("/sobre", [{ tag: "h1", headingLevel: 1 }, { tag: "p" }]), 2, sameInstallation ? 1 : 2)
+    row("a", snapshot("/", [{ tag: "h1", headingLevel: 1 }], scripts), 1, 1),
+    row("b", snapshot("/sobre", [{ tag: "h1", headingLevel: 1 }, { tag: "p" }], scripts), 2, sameInstallation ? 1 : 2)
   ];
 }
 
-test("nao enfileira plano base com duas capturas imediatas da mesma instalacao", async () => {
-  const rows = validRows({ sameInstallation: true });
+test("aguarda uma terceira captura para uma familia com sinais dinamicos", async () => {
+  const rows = validRows({
+    sameInstallation: true,
+    scripts: { total: 20, moduleCount: 1, asyncCount: 4 }
+  });
   const service = createAdaptationService({
     database: { configured: true, query: async () => ({ rows }) },
     gemini: { configured: true }
   });
 
   const result = await service.considerSnapshot({ origin: "https://example.com" });
-  assert.equal(result.state, "awaiting-trusted-snapshots");
-  assert.equal(result.trust.reason, "awaiting-independent-or-stable-snapshot");
+  assert.equal(result.state, "awaiting-family-confidence");
+  assert.equal(result.confidence.dynamic, true);
+  assert.equal(result.confidence.requiredSamples, 3);
+  assert.equal(result.confidence.reason, "dynamic-family-needs-more-snapshots");
 });
 
 test("persiste, executa e publica um plano base confiavel", async () => {
@@ -99,6 +104,7 @@ test("persiste, executa e publica um plano base confiavel", async () => {
   assert.equal(result.plan.planScope, "base");
   assert.equal(events.length, 1);
   assert.equal(events[0].origin, "https://example.com");
+  assert.ok(statements.some(({ statement }) => statement.includes("sample_count") && statement.includes("confidence_score")));
   assert.ok(statements.some(({ statement }) => /INSERT INTO easyweb_adaptation_jobs/.test(statement)));
   assert.ok(statements.some(({ statement }) => /UPDATE easyweb_adaptation_jobs/.test(statement)));
 });

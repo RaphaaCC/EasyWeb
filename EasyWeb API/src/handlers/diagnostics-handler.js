@@ -43,13 +43,14 @@ export function createDiagnosticsHandler({ database, gemini, now = () => new Dat
         database: { configured: false, status: "not-configured" },
         gemini: { configured: Boolean(gemini?.configured), model: gemini?.model || null },
         snapshots: { total: 0, sites: 0, bytes: 0, latest: [] },
+        families: { total: 0, observing: 0, eligible: 0, ready: 0, noOpportunity: 0, averageConfidence: 0 },
         plans: { total: 0, active: 0, latestUpdateAt: null },
         jobs: { totals: {}, latest: [] }
       };
     }
 
     try {
-      const [health, snapshotTotals, latestSnapshots, planTotals, jobTotals, latestJobs] = await Promise.all([
+      const [health, snapshotTotals, latestSnapshots, familyTotals, planTotals, jobTotals, latestJobs] = await Promise.all([
         database.health(),
         database.query(
           `SELECT COUNT(*) AS total, COUNT(DISTINCT origin_hash) AS siteCount,
@@ -62,6 +63,15 @@ export function createDiagnosticsHandler({ database, gemini, now = () => new Dat
            FROM easyweb_site_snapshots
            ORDER BY last_seen_at DESC
            LIMIT ${LATEST_ROWS_LIMIT}`
+        ),
+        database.query(
+          `SELECT COUNT(*) AS total,
+                  COALESCE(SUM(status = 'observing'), 0) AS observing,
+                  COALESCE(SUM(status = 'eligible'), 0) AS eligible,
+                  COALESCE(SUM(status = 'ready'), 0) AS ready,
+                  COALESCE(SUM(evaluation_reason = 'no-safe-accessibility-opportunity'), 0) AS noOpportunity,
+                  COALESCE(AVG(confidence_score), 0) AS averageConfidence
+           FROM easyweb_adaptation_families`
         ),
         database.query(
           `SELECT COUNT(*) AS total, COALESCE(SUM(status = 'active'), 0) AS active,
@@ -82,6 +92,7 @@ export function createDiagnosticsHandler({ database, gemini, now = () => new Dat
         )
       ]);
       const snapshot = asRows(snapshotTotals)[0] || {};
+      const families = asRows(familyTotals)[0] || {};
       const plans = asRows(planTotals)[0] || {};
       const totals = Object.fromEntries(asRows(jobTotals).map((row) => [row.state, asNumber(row.total)]));
       return {
@@ -95,6 +106,14 @@ export function createDiagnosticsHandler({ database, gemini, now = () => new Dat
           bytes: asNumber(snapshot.payloadBytes),
           lastSeenAt: snapshot.lastSeenAt || null,
           latest: asRows(latestSnapshots).map(publicSnapshot)
+        },
+        families: {
+          total: asNumber(families.total),
+          observing: asNumber(families.observing),
+          eligible: asNumber(families.eligible),
+          ready: asNumber(families.ready),
+          noOpportunity: asNumber(families.noOpportunity),
+          averageConfidence: asNumber(families.averageConfidence)
         },
         plans: {
           total: asNumber(plans.total),
@@ -113,6 +132,7 @@ export function createDiagnosticsHandler({ database, gemini, now = () => new Dat
         database: { configured: true, status: "unavailable" },
         gemini: { configured: Boolean(gemini?.configured), model: gemini?.model || null },
         snapshots: { total: 0, sites: 0, bytes: 0, latest: [] },
+        families: { total: 0, observing: 0, eligible: 0, ready: 0, noOpportunity: 0, averageConfidence: 0 },
         plans: { total: 0, active: 0, latestUpdateAt: null },
         jobs: { totals: {}, latest: [] },
         error: "Não foi possível consultar os dados operacionais."

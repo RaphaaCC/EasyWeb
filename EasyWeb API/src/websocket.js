@@ -79,6 +79,7 @@ function sendAdaptationStatus(socket, origin, result, extra = {}) {
     state: result?.state || "unavailable",
     similarity: result?.similarity,
     trust: result?.trust,
+    confidence: result?.confidence,
     ...extra
   });
 }

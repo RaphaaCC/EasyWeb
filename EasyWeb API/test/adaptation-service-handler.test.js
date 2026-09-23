@@ -3,13 +3,13 @@ import test from "node:test";
 import { gzipSync } from "node:zlib";
 import { calculateStructuralSimilarity, createAdaptationService } from "../src/handlers/adaptation-service-handler.js";
 
-function createSnapshot(tree) {
+function createSnapshot(tree, { styles = { styleSheetCount: 1 }, scripts = { total: 1 } } = {}) {
   return {
     captureVersion: 1,
     page: { origin: "https://example.com", path: "/" },
     structure: { tree },
-    styles: { styleSheetCount: 1 },
-    scripts: { total: 1 }
+    styles,
+    scripts
   };
 }
 
@@ -61,6 +61,26 @@ test("não chama o modelo sem uma chave configurada", async () => {
   assert.deepEqual(await service.considerSnapshot({ origin: "https://example.com" }), {
     state: "model-unavailable"
   });
+});
+
+test("nao enfileira uma familia estavel sem oportunidade automatica segura", async () => {
+  const styleEvidence = { styleSheetCount: 1, fontSizes: ["18px"], colors: ["#111111", "#ffffff"] };
+  const first = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "h1", headingLevel: 1 }] }, { styles: styleEvidence });
+  const second = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "h1", headingLevel: 1 }, { tag: "p" }] }, { styles: styleEvidence });
+  second.page.path = "/sobre";
+  const rows = [createRow("a", first, 1, 1), createRow("b", second, 2, 2)];
+  const service = createAdaptationService({
+    database: {
+      configured: true,
+      query: async (statement) => ({ rows: /easyweb_site_snapshots/.test(statement) ? rows : [] })
+    },
+    gemini: { configured: true }
+  });
+
+  const result = await service.considerSnapshot({ origin: "https://example.com" });
+  assert.equal(result.state, "family-stable-no-opportunity");
+  assert.equal(result.confidence.reason, "no-safe-accessibility-opportunity");
+  assert.equal(result.confidence.sampleCount, 2);
 });
 
 test("compara rotas distintas mesmo quando a estrutura sanitizada é idêntica", () => {

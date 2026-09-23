@@ -6,6 +6,11 @@ const MAX_CANDIDATE_SNAPSHOTS = 8;
 const PLAN_TTL_DAYS = 30;
 const MIN_TRUSTED_TREE_NODES = 2;
 const MIN_SINGLE_INSTALLATION_OBSERVATION_MS = 10 * 60_000;
+const STATIC_FAMILY_MIN_SAMPLES = 2;
+const DYNAMIC_FAMILY_MIN_SAMPLES = 3;
+const FAMILY_CONFIDENCE_THRESHOLD = 0.72;
+const DYNAMIC_FAMILY_THRESHOLD = 0.45;
+const MIN_OPPORTUNITY_SCORE = 0.15;
 const MAX_BASE_JOB_ATTEMPTS = 4;
 const STALE_JOB_LOCK_MINUTES = 5;
 
@@ -117,6 +122,149 @@ function findBestPair(rows) {
   return parsedPairs(rows).reduce((best, pair) => !best || pair.similarity > best.similarity ? pair : best, null);
 }
 
+function clamp(value, minimum = 0, maximum = 1) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function average(values) {
+  return values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function parsePixelSize(value) {
+  const match = typeof value === "string" && value.trim().match(/^(\d+(?:\.\d+)?)px$/i);
+  return match ? Number(match[1]) : null;
+}
+
+function assessSnapshotDynamism(snapshot) {
+  const scripts = snapshot?.scripts || {};
+  const structure = flattenTree(snapshot?.structure?.tree);
+  const totalScripts = Number(scripts.total) || 0;
+  const moduleScripts = Number(scripts.moduleCount) || 0;
+  const asyncScripts = Number(scripts.asyncCount) || 0;
+  const pressure = totalScripts / Math.max(12, structure.total * 2);
+  return Number(clamp(
+    pressure * 0.45 + (moduleScripts > 0 ? 0.15 : 0) + (asyncScripts >= 3 ? 0.1 : 0) +
+    (snapshot?.structure?.truncated === true ? 0.25 : 0)
+  ).toFixed(5));
+}
+
+function assessSnapshotOpportunity(snapshot) {
+  const structure = flattenTree(snapshot?.structure?.tree);
+  const styles = snapshot?.styles || {};
+  const fontSizes = Array.isArray(styles.fontSizes) ? styles.fontSizes.map(parsePixelSize).filter(Number.isFinite) : [];
+  const hasStyleEvidence = fontSizes.length > 0 || (Array.isArray(styles.colors) && styles.colors.length > 0);
+  let score = 0;
+  if (structure.landmarks === 0) score += 0.35;
+  if (structure.headings === 0) score += 0.2;
+  if (structure.interactive >= 6) score += 0.1;
+  if (fontSizes.some((size) => size < 14)) score += 0.35;
+  // Missing style details are inconclusive, not evidence that a page needs no help.
+  if (score === 0 && !hasStyleEvidence) score = 0.2;
+  return Number(clamp(score).toFixed(5));
+}
+
+function createPairs(snapshots) {
+  const pairs = [];
+  for (let leftIndex = 0; leftIndex < snapshots.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < snapshots.length; rightIndex += 1) {
+      const left = snapshots[leftIndex];
+      const right = snapshots[rightIndex];
+      if (left.sampleKey === right.sampleKey) continue;
+      pairs.push({ left, right, similarity: calculateStructuralSimilarity(left.snapshot, right.snapshot) });
+    }
+  }
+  return pairs;
+}
+
+function createFamilyCandidate(rows) {
+  const snapshots = rows.map(parseSnapshotRow).filter(Boolean);
+  const allPairs = createPairs(snapshots).sort((left, right) => right.similarity - left.similarity);
+  if (!allPairs.length) return { state: "awaiting-second-snapshot" };
+
+  const seed = allPairs.find((pair) => pair.similarity >= FAMILY_SIMILARITY_THRESHOLD);
+  if (!seed) {
+    return { state: "awaiting-compatible-snapshot", similarity: allPairs[0].similarity };
+  }
+
+  const members = snapshots.filter((candidate) => candidate.sampleKey === seed.left.sampleKey ||
+    candidate.sampleKey === seed.right.sampleKey ||
+    (calculateStructuralSimilarity(candidate.snapshot, seed.left.snapshot) >= FAMILY_SIMILARITY_THRESHOLD &&
+      calculateStructuralSimilarity(candidate.snapshot, seed.right.snapshot) >= FAMILY_SIMILARITY_THRESHOLD));
+  const pairs = createPairs(members).filter((pair) => pair.similarity >= FAMILY_SIMILARITY_THRESHOLD);
+  const pair = pairs.sort((left, right) => right.similarity - left.similarity)[0] || seed;
+  const stabilityScore = median(pairs.map((candidate) => candidate.similarity));
+  const sampleCount = members.length;
+  const distinctPathCount = new Set(members.map((member) => member.snapshot.page?.path).filter(Boolean)).size;
+  const installationCount = new Set(members.map((member) => member.installationHash).filter(Boolean)).size;
+  const firstObservedAt = Math.min(...members.map((member) => member.createdAt || Infinity));
+  const lastObservedAt = Math.max(...members.map((member) => member.lastSeenAt || 0));
+  const observationMs = Number.isFinite(firstObservedAt) ? Math.max(0, lastObservedAt - firstObservedAt) : 0;
+  const dynamismScore = average(members.map((member) => assessSnapshotDynamism(member.snapshot)));
+  const opportunityScore = average(members.map((member) => assessSnapshotOpportunity(member.snapshot)));
+  const dynamic = dynamismScore >= DYNAMIC_FAMILY_THRESHOLD;
+  const requiredSamples = dynamic ? DYNAMIC_FAMILY_MIN_SAMPLES : STATIC_FAMILY_MIN_SAMPLES;
+  const independentEvidence = installationCount >= 2;
+  const routeEvidence = distinctPathCount >= 2;
+  const temporalEvidence = observationMs >= MIN_SINGLE_INSTALLATION_OBSERVATION_MS;
+  const evidenceSatisfied = dynamic
+    ? sampleCount >= requiredSamples && (independentEvidence || routeEvidence || temporalEvidence)
+    : sampleCount >= requiredSamples && (independentEvidence || routeEvidence || temporalEvidence);
+  const confidenceScore = Number(clamp(
+    stabilityScore * 0.55 +
+    Math.min(sampleCount / requiredSamples, 1) * 0.2 +
+    (independentEvidence ? 0.15 : routeEvidence ? 0.1 : 0) +
+    (temporalEvidence ? 0.1 : 0) -
+    (dynamic ? 0.03 : 0)
+  ).toFixed(5));
+  const reason = !evidenceSatisfied
+    ? dynamic && sampleCount < requiredSamples
+      ? "dynamic-family-needs-more-snapshots"
+      : "awaiting-independent-route-or-time-evidence"
+    : confidenceScore < FAMILY_CONFIDENCE_THRESHOLD
+      ? "family-confidence-below-threshold"
+      : opportunityScore < MIN_OPPORTUNITY_SCORE
+        ? "no-safe-accessibility-opportunity"
+        : "eligible";
+  const confidence = {
+    score: confidenceScore,
+    stabilityScore: Number(stabilityScore.toFixed(5)),
+    dynamismScore: Number(dynamismScore.toFixed(5)),
+    opportunityScore: Number(opportunityScore.toFixed(5)),
+    sampleCount,
+    requiredSamples,
+    distinctPathCount,
+    installationCount,
+    observationMs,
+    dynamic,
+    reason
+  };
+  const trust = {
+    trusted: evidenceSatisfied && confidenceScore >= FAMILY_CONFIDENCE_THRESHOLD,
+    basis: independentEvidence ? "independent-installations" : routeEvidence ? "distinct-routes" : temporalEvidence ? "time-observed" : null,
+    observationMs
+  };
+  const adaptationFingerprint = createAdaptationFingerprint(pair.left.snapshot.page.origin, pair);
+  if (!evidenceSatisfied || confidenceScore < FAMILY_CONFIDENCE_THRESHOLD) {
+    return { state: "awaiting-family-confidence", pair, adaptationFingerprint, similarity: stabilityScore, confidence, trust };
+  }
+  if (opportunityScore < MIN_OPPORTUNITY_SCORE) {
+    return { state: "family-stable-no-opportunity", pair, adaptationFingerprint, similarity: stabilityScore, confidence, trust };
+  }
+  return { state: "eligible", pair, adaptationFingerprint, similarity: stabilityScore, confidence, trust };
+}
+
+function publicCandidate(candidate) {
+  const { pair, adaptationFingerprint, ...publicValue } = candidate;
+  return publicValue;
+}
+
 export function assessSnapshotPairTrust(pair) {
   if (!pair) return { trusted: false, reason: "awaiting-second-snapshot" };
   const leftSummary = flattenTree(pair.left.snapshot.structure?.tree);
@@ -202,30 +350,7 @@ export function createAdaptationService({ database, gemini, now = () => new Date
   }
 
   function resolveCandidate(rows) {
-    const pairs = parsedPairs(rows).sort((left, right) => right.similarity - left.similarity);
-    if (!pairs.length) return { state: "awaiting-second-snapshot" };
-    const compatiblePairs = pairs.filter((pair) => pair.similarity >= FAMILY_SIMILARITY_THRESHOLD);
-    if (!compatiblePairs.length) {
-      return { state: "awaiting-compatible-snapshot", similarity: pairs[0].similarity };
-    }
-    const trustedCandidate = compatiblePairs
-      .map((pair) => ({ pair, trust: assessSnapshotPairTrust(pair) }))
-      .find((candidate) => candidate.trust.trusted);
-    if (!trustedCandidate) {
-      const pair = compatiblePairs[0];
-      return {
-        state: "awaiting-trusted-snapshots",
-        similarity: pair.similarity,
-        trust: assessSnapshotPairTrust(pair)
-      };
-    }
-    const { pair, trust } = trustedCandidate;
-    return {
-      state: "eligible",
-      pair,
-      trust,
-      adaptationFingerprint: createAdaptationFingerprint(pair.left.snapshot.page.origin, pair)
-    };
+    return createFamilyCandidate(rows);
   }
 
   async function loadActivePlan(adaptationFingerprint, origin) {
@@ -257,14 +382,29 @@ export function createAdaptationService({ database, gemini, now = () => new Date
     return plan?.origin === origin ? plan : null;
   }
 
-  async function persistFamily(origin, pair, adaptationFingerprint) {
+  async function persistFamily(origin, candidate, status = "observing") {
+    const { pair, adaptationFingerprint, similarity, confidence } = candidate;
     await database.query(
       `INSERT INTO easyweb_adaptation_families (
         origin_hash, site_origin, adaptation_hash, primary_content_hash,
-        secondary_content_hash, similarity, status
-      ) VALUES (?, ?, ?, ?, ?, ?, 'ready')
+        secondary_content_hash, similarity, status, sample_count, distinct_path_count,
+        installation_count, stability_score, dynamism_score, opportunity_score,
+        confidence_score, evaluation_reason, last_evaluated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
       ON DUPLICATE KEY UPDATE
+        primary_content_hash = VALUES(primary_content_hash),
+        secondary_content_hash = VALUES(secondary_content_hash),
         similarity = VALUES(similarity),
+        status = IF(status = 'ready' AND VALUES(status) <> 'ready', 'ready', VALUES(status)),
+        sample_count = VALUES(sample_count),
+        distinct_path_count = VALUES(distinct_path_count),
+        installation_count = VALUES(installation_count),
+        stability_score = VALUES(stability_score),
+        dynamism_score = VALUES(dynamism_score),
+        opportunity_score = VALUES(opportunity_score),
+        confidence_score = VALUES(confidence_score),
+        evaluation_reason = VALUES(evaluation_reason),
+        last_evaluated_at = UTC_TIMESTAMP(),
         last_seen_at = CURRENT_TIMESTAMP`,
       [
         hash(origin),
@@ -272,7 +412,16 @@ export function createAdaptationService({ database, gemini, now = () => new Date
         Buffer.from(adaptationFingerprint, "hex"),
         Buffer.from(pair.left.contentHash, "hex"),
         Buffer.from(pair.right.contentHash, "hex"),
-        pair.similarity
+        similarity,
+        status,
+        confidence.sampleCount,
+        confidence.distinctPathCount,
+        confidence.installationCount,
+        confidence.stabilityScore,
+        confidence.dynamismScore,
+        confidence.opportunityScore,
+        confidence.score,
+        confidence.reason
       ]
     );
     const result = await database.query(
@@ -282,7 +431,8 @@ export function createAdaptationService({ database, gemini, now = () => new Date
     return result.rows?.[0]?.id || null;
   }
 
-  async function persistPlan({ origin, pair, adaptationFingerprint, familyId, generated }) {
+  async function persistPlan({ origin, candidate, familyId, generated }) {
+    const { pair, adaptationFingerprint, confidence } = candidate;
     const versionResult = await database.query(
       "SELECT COALESCE(MAX(plan_version), 0) + 1 AS next_version FROM easyweb_adaptation_base_plans WHERE family_id = ?",
       [familyId]
@@ -296,6 +446,7 @@ export function createAdaptationService({ database, gemini, now = () => new Date
       snapshotTemplateHashes: [pair.left.templateHash, pair.right.templateHash],
       sourceContentHashes: [pair.left.contentHash, pair.right.contentHash],
       adaptationFingerprint,
+      familyConfidence: confidence,
       profile: "universal",
       confidence: generated.confidence,
       summary: generated.summary || "Ajustes de acessibilidade sugeridos para esta estrutura.",
@@ -327,11 +478,12 @@ export function createAdaptationService({ database, gemini, now = () => new Date
     return plan;
   }
 
-  async function createBasePlan(origin, pair, adaptationFingerprint) {
+  async function createBasePlan(origin, candidate) {
+    const { pair, adaptationFingerprint } = candidate;
     const existing = await loadActivePlan(adaptationFingerprint, origin);
     if (existing) return existing;
     if (!gemini?.configured) throw createServiceError("EASYWEB_GEMINI_UNAVAILABLE", false);
-    const familyId = await persistFamily(origin, pair, adaptationFingerprint);
+    const familyId = await persistFamily(origin, candidate, "ready");
     if (!familyId) throw createServiceError("EASYWEB_ADAPTATION_FAMILY_UNAVAILABLE", true);
     const generated = await gemini.generate({
       origin,
@@ -339,7 +491,7 @@ export function createAdaptationService({ database, gemini, now = () => new Date
       profile: "universal",
       snapshots: [pair.left.snapshot, pair.right.snapshot]
     });
-    return persistPlan({ origin, pair, adaptationFingerprint, familyId, generated });
+    return persistPlan({ origin, candidate, familyId, generated });
   }
 
   async function enqueueBaseAnalysis(origin, pair, adaptationFingerprint) {
@@ -423,22 +575,21 @@ export function createAdaptationService({ database, gemini, now = () => new Date
     const job = await claimNextBaseJob();
     if (!job) return { state: "idle" };
     try {
-      const pair = findJobPair(await recentSnapshots(job.site_origin), job);
-      if (!pair) {
+      const rows = await recentSnapshots(job.site_origin);
+      if (!findJobPair(rows, job)) {
         await settleJob(job, "failed", { error: "source-snapshots-unavailable" });
         return { state: "failed", reason: "source-snapshots-unavailable", jobId: job.id };
       }
-      const trust = assessSnapshotPairTrust(pair);
-      if (!trust.trusted || pair.similarity < FAMILY_SIMILARITY_THRESHOLD) {
-        await settleJob(job, "failed", { error: "source-snapshots-no-longer-trusted" });
-        return { state: "failed", reason: "source-snapshots-no-longer-trusted", jobId: job.id };
+      const candidate = resolveCandidate(rows);
+      if (candidate.state !== "eligible") {
+        await settleJob(job, "failed", { error: `family-${candidate.state}` });
+        return { state: "failed", reason: `family-${candidate.state}`, jobId: job.id };
       }
-      const adaptationFingerprint = createAdaptationFingerprint(job.site_origin, pair);
-      if (adaptationFingerprint !== hex(job.adaptation_hash)) {
+      if (candidate.adaptationFingerprint !== hex(job.adaptation_hash)) {
         await settleJob(job, "failed", { error: "source-snapshots-changed" });
         return { state: "failed", reason: "source-snapshots-changed", jobId: job.id };
       }
-      const plan = await createBasePlan(job.site_origin, pair, adaptationFingerprint);
+      const plan = await createBasePlan(job.site_origin, candidate);
       await settleJob(job, "completed");
       publishBasePlan(job.site_origin, plan);
       return { state: "ready", jobId: job.id, plan };
@@ -459,9 +610,12 @@ export function createAdaptationService({ database, gemini, now = () => new Date
   async function considerSnapshot({ origin }) {
     if (!database?.configured) return { state: "storage-unavailable" };
     const candidate = resolveCandidate(await recentSnapshots(origin));
+    if (candidate.pair) {
+      await persistFamily(origin, candidate, candidate.state === "eligible" ? "eligible" : "observing");
+    }
     if (candidate.state !== "eligible") {
       const existing = await loadLatestActivePlanForOrigin(origin);
-      return existing ? { state: "ready", plan: existing, source: "origin-cache" } : candidate;
+      return existing ? { state: "ready", plan: existing, source: "origin-cache" } : publicCandidate(candidate);
     }
     const existing = await loadActivePlan(candidate.adaptationFingerprint, origin);
     if (existing) return { state: "ready", plan: existing };
@@ -475,7 +629,7 @@ export function createAdaptationService({ database, gemini, now = () => new Date
     const candidate = resolveCandidate(await recentSnapshots(origin));
     if (candidate.state !== "eligible") {
       const existing = await loadLatestActivePlanForOrigin(origin);
-      return existing ? { state: "ready", plan: existing, source: "origin-cache" } : candidate;
+      return existing ? { state: "ready", plan: existing, source: "origin-cache" } : publicCandidate(candidate);
     }
     const plan = await loadActivePlan(candidate.adaptationFingerprint, origin);
     if (plan) return { state: "ready", plan };

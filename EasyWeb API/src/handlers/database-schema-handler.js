@@ -1,4 +1,4 @@
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const TABLES = Object.freeze([
   {
@@ -60,6 +60,15 @@ const TABLES = Object.freeze([
       secondary_content_hash BINARY(32) NOT NULL,
       similarity DECIMAL(6,5) NOT NULL,
       status VARCHAR(32) NOT NULL DEFAULT 'ready',
+      sample_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+      distinct_path_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+      installation_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+      stability_score DECIMAL(6,5) NOT NULL DEFAULT 0,
+      dynamism_score DECIMAL(6,5) NOT NULL DEFAULT 0,
+      opportunity_score DECIMAL(6,5) NOT NULL DEFAULT 0,
+      confidence_score DECIMAL(6,5) NOT NULL DEFAULT 0,
+      evaluation_reason VARCHAR(96) NULL,
+      last_evaluated_at DATETIME NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
@@ -75,6 +84,15 @@ const TABLES = Object.freeze([
       ["secondary_content_hash", "BINARY(32) NOT NULL"],
       ["similarity", "DECIMAL(6,5) NOT NULL"],
       ["status", "VARCHAR(32) NOT NULL DEFAULT 'ready'"],
+      ["sample_count", "SMALLINT UNSIGNED NOT NULL DEFAULT 0"],
+      ["distinct_path_count", "SMALLINT UNSIGNED NOT NULL DEFAULT 0"],
+      ["installation_count", "SMALLINT UNSIGNED NOT NULL DEFAULT 0"],
+      ["stability_score", "DECIMAL(6,5) NOT NULL DEFAULT 0"],
+      ["dynamism_score", "DECIMAL(6,5) NOT NULL DEFAULT 0"],
+      ["opportunity_score", "DECIMAL(6,5) NOT NULL DEFAULT 0"],
+      ["confidence_score", "DECIMAL(6,5) NOT NULL DEFAULT 0"],
+      ["evaluation_reason", "VARCHAR(96) NULL"],
+      ["last_evaluated_at", "DATETIME NULL"],
       ["created_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"],
       ["last_seen_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"]
     ],

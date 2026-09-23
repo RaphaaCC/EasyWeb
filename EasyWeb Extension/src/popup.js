@@ -281,6 +281,8 @@ function renderAiAdaptation(preferences, adaptation = {}, planState, apiConnecti
     "awaiting-second-snapshot": "Aguardando snapshots: a API precisa de mais uma estrutura compatível deste site.",
     "awaiting-compatible-snapshot": "Aguardando snapshots: a API está identificando uma família de páginas compatível.",
     "awaiting-trusted-snapshots": "Aguardando snapshots: falta confirmar a estabilidade da estrutura deste site.",
+    "awaiting-family-confidence": "Aguardando evidências: a API ainda está confirmando a estabilidade desta família de páginas.",
+    "family-stable-no-opportunity": "Família estável: a API não identificou uma melhoria automática segura neste momento.",
     "analyzing-base": "Analisando: a IA está preparando os ajustes comuns deste site.",
     "analyzing-personal": "Analisando: a IA está preparando seu ajuste pessoal.",
     "checking-adaptation": "Consultando: verificando uma adaptação já preparada para este site.",

@@ -668,8 +668,13 @@ async function handleAdaptationDelivery(message) {
         state: message.state,
         similarity: message.similarity,
         trust: message.trust,
+        confidence: message.confidence,
         message: message.state === "analyzing-base"
           ? "A IA esta preparando uma adaptacao para a estrutura confirmada deste site."
+          : message.state === "awaiting-family-confidence"
+            ? "A API esta reunindo evidencias suficientes antes de solicitar uma adaptacao."
+            : message.state === "family-stable-no-opportunity"
+              ? "A API confirmou a familia, mas nao encontrou uma melhoria automatica segura."
           : undefined
       }
     }, preferredTabId);

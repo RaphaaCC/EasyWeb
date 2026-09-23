@@ -17,7 +17,7 @@ export function diagnosticsDashboardHtml() {
     button { border: 1px solid #087d70; padding: 0 12px; background: #087d70; color: #fff; font-weight: 700; cursor: pointer; }
     button:hover, button:focus-visible { background: #06665c; outline: 2px solid #8bd9ce; outline-offset: 2px; }
     .status { min-height: 20px; margin: 0 0 16px; color: #5d716c; font-size: 14px; } .status.error { color: #a14133; }
-    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
     .metric, section { border: 1px solid #cedfd9; border-radius: 8px; background: #fff; }
     .metric { padding: 16px; } .metric span { display:block; color:#5d716c; font-size:12px; font-weight:700; text-transform:uppercase; }
     .metric strong { display:block; margin-top:8px; font-size:25px; }
@@ -65,7 +65,7 @@ export function diagnosticsDashboardScript() {
   }
   function render(data) {
     clear(metrics);
-    const cards = [ ['Snapshots', data.snapshots.total], ['Sites', data.snapshots.sites], ['Planos ativos', data.plans.active + ' / ' + data.plans.total], ['Fila pendente', (data.jobs.totals.queued || 0) + (data.jobs.totals.retry || 0)] ];
+    const cards = [ ['Snapshots', data.snapshots.total], ['Sites', data.snapshots.sites], ['Familias em observacao', data.families.observing], ['Confianca media', Math.round(data.families.averageConfidence * 100) + '%'], ['Planos ativos', data.plans.active + ' / ' + data.plans.total], ['Fila pendente', (data.jobs.totals.queued || 0) + (data.jobs.totals.retry || 0)] ];
     cards.forEach(([label, value]) => { const card = document.createElement('div'); card.className = 'metric'; const caption = document.createElement('span'); caption.textContent = label; const result = document.createElement('strong'); result.textContent = String(value); card.append(caption, result); metrics.append(card); });
     table(snapshots, [ { label:'Site', value: row => row.origin + row.path }, { label:'Capturas', value: row => row.captures }, { label:'Tamanho', value: row => formatBytes(row.bytes) }, { label:'Último', value: row => date(row.lastSeenAt) } ], data.snapshots.latest);
     table(jobs, [ { label:'Site', value: row => row.origin }, { label:'Estado', value: row => row.state }, { label:'Tentativas', value: row => row.attempts }, { label:'Atualizado', value: row => date(row.updatedAt) }, { label:'Erro', value: row => row.lastError || '-' } ], data.jobs.latest);

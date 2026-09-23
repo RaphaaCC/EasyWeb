@@ -10,7 +10,9 @@ const TABLE_COLUMNS = {
   ],
   easyweb_adaptation_families: [
     "id", "origin_hash", "site_origin", "adaptation_hash", "primary_content_hash", "secondary_content_hash",
-    "similarity", "status", "created_at", "last_seen_at"
+    "similarity", "status", "sample_count", "distinct_path_count", "installation_count", "stability_score",
+    "dynamism_score", "opportunity_score", "confidence_score", "evaluation_reason", "last_evaluated_at",
+    "created_at", "last_seen_at"
   ],
   easyweb_adaptation_base_plans: [
     "id", "family_id", "plan_key", "plan_version", "plan_json", "model_name", "prompt_version",
@@ -84,7 +86,7 @@ test("não tenta sincronizar MySQL quando ele não foi configurado", async () =>
   assert.deepEqual(result, {
     synchronized: false,
     reason: "not-configured",
-    schemaVersion: 2,
+    schemaVersion: 3,
     tables: [],
     changes: []
   });
@@ -96,7 +98,7 @@ test("verifica o schema canônico completo a cada sincronização", async () => 
 
   assert.deepEqual(result, {
     synchronized: true,
-    schemaVersion: 2,
+    schemaVersion: 3,
     tables: [
       "easyweb_site_snapshots",
       "easyweb_adaptation_families",

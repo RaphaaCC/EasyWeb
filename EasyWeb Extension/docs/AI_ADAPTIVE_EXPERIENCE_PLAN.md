@@ -242,9 +242,9 @@ página para que a solicitação possa continuar.
 2. No popup, autoriza uma origem específica para análise de IA.
 3. A extensão filtra dados sensíveis e envia um snapshot estrutural para a API pelo WebSocket.
 4. A extensão usa o fingerprint de captura para reduzir reenvios repetidos da mesma página, mas mantém uma janela de amostragem por origem para permitir uma segunda captura estruturalmente relevante.
-5. A API normaliza e armazena cada snapshot protegido. Quando houver pelo menos dois snapshots compatíveis na mesma origem, ela calcula a similaridade estrutural e forma uma família de páginas somente se o limiar configurado for alcançado.
+5. A API normaliza e armazena cada snapshot protegido. Ela agrupa capturas compatíveis em uma família, calcula estabilidade, dinamismo, oportunidade de acessibilidade e confiança. Famílias estáticas exigem duas amostras; famílias dinâmicas exigem ao menos três, sempre com evidência por instalação, rota ou tempo de observação.
 6. Se os snapshots forem incompatíveis, por exemplo uma página institucional e um checkout, a API os mantém em famílias separadas e aguarda novas amostras. Ela nunca usa duas páginas estruturalmente diferentes para gerar um único plano base.
-7. Para uma família confirmada, a API reúne os dois snapshots protegidos, os diagnósticos técnicos e as capacidades do executor. A IA recebe esse contexto e devolve um plano base JSON.
+7. Para uma família confirmada, a API seleciona um par representativo de snapshots protegidos, preserva os escores agregados da família e reúne os diagnósticos técnicos e as capacidades do executor. A IA recebe esse contexto e devolve um plano base JSON.
 8. A API valida schema, ações, limites, versões e compatibilidade com a assinatura de adaptação; então armazena o plano base versionado.
 9. A extensão recebe o plano base pelo WebSocket, ou o consulta ao carregar uma página compatível. Ela o valida novamente, compila a camada local e aplica conforme as preferências do usuário.
 10. O popup mostra um resumo e, conforme a preferência, pede confirmação antes de aplicar.
@@ -252,16 +252,16 @@ página para que a solicitação possa continuar.
 12. Se houver falha, o plano é removido automaticamente e o algoritmo padrão permanece ativo.
 13. O usuário pode manter, ajustar, desfazer ou avaliar a experiência adaptativa.
 
-### 7.1 Plano base: análise após dois snapshots
+### 7.1 Plano base: análise por família confiável
 
-O requisito de dois snapshots não significa comparar quaisquer duas páginas do
+O requisito mínimo de duas amostras para páginas estáticas não significa comparar quaisquer duas páginas do
 mesmo domínio. A API deve comparar representações protegidas e calcular, no
 mínimo, compatibilidade entre regiões semânticas, hierarquia de tags, densidade
 de controles e assinatura visual. O resultado pode ser:
 
 | Resultado da comparação | Decisão da API |
 | --- | --- |
-| Alta similaridade | Cria ou atualiza uma família de páginas e libera análise do plano base. |
+| Alta similaridade e confiança suficiente | Cria ou atualiza uma família de páginas e libera análise do plano base somente se houver oportunidade segura. |
 | Similaridade intermediária | Mantém a família como candidata e aguarda outro snapshot. |
 | Baixa similaridade | Cria famílias separadas e não compartilha plano entre elas. |
 
@@ -739,7 +739,7 @@ O WebSocket já serve para snapshots. A evolução pode usar as seguintes mensag
 ```
 
 ```json
-{ "type": "easyweb:adaptation:pending", "origin": "https://exemplo.gov.br", "adaptationFingerprint": "...", "stage": "awaiting-second-snapshot|comparing-family|analyzing-base" }
+{ "type": "easyweb:adaptation:pending", "origin": "https://exemplo.gov.br", "adaptationFingerprint": "...", "stage": "awaiting-family-confidence|family-stable-no-opportunity|analyzing-base" }
 ```
 
 ```json
@@ -787,7 +787,8 @@ local.
 | Sem autorização do site | “Autorize este site para análise de IA.” | Switch de autorização. |
 | Snapshot aguardando | “Preparando snapshot protegido.” | Cancelar autorização. |
 | Snapshot sincronizado | “Estrutura recebida pela API.” | Capturar novamente. |
-| Aguardando segunda amostra | “A API precisa confirmar a estrutura deste site com outra visita compatível.” | Continuar usando o EasyWeb normalmente. |
+| Aguardando evidências | “A API está confirmando a estabilidade desta família de páginas.” | Continuar usando o EasyWeb normalmente. |
+| Família estável sem oportunidade | “A API não identificou uma melhoria automática segura neste momento.” | Continuar usando o EasyWeb normalmente. |
 | Comparando estrutura | “A API está verificando se as páginas pertencem à mesma família.” | Usar algoritmo padrão. |
 | Análise base pendente | “A IA está preparando os ajustes comuns deste site.” | Usar algoritmo padrão. |
 | Pedido pessoal enviado | “A análise considera a dificuldade informada por você.” | Cancelar ou usar algoritmo padrão. |
@@ -855,8 +856,9 @@ Um plano só é considerado pronto quando:
 - Versionar mensagens WebSocket de plano e resultado.
 - Criar armazenamento de planos, expiração e associação por assinatura de
   adaptação, mantendo referência à assinatura de snapshot de origem.
-- Implementar amostragem de dois snapshots, agrupamento em famílias e limiar de
-  similaridade antes de chamar a IA para um plano base.
+- Manter a amostragem por família: duas amostras para estruturas estáticas,
+  três para famílias dinâmicas, com limiar de similaridade, evidência independente
+  e escore de oportunidade antes de chamar a IA para um plano base.
 - Implementar API simulada que retorna planos fixos para testes.
 
 ### Fase 4: Integração de IA
@@ -881,7 +883,7 @@ Um plano só é considerado pronto quando:
 | Compartilhamento | Planos base são compartilháveis por origem e família estrutural. Deltas pessoais ficam somente na extensão solicitante. |
 | Catálogo de nível 1 | Tipografia, espaçamento, foco, links, bordas de controles, redução de movimento, áreas de toque e CSS declarativo. |
 | Aplicação inicial | Ajustes de nível 1 são aplicados automaticamente depois de validados; a prévia explícita permanece pendente. |
-| Família de páginas | Similaridade estrutural mínima de `0.72`, calculada após ao menos duas amostras. |
+| Família de páginas | Similaridade estrutural mínima de `0.72`; estruturas estáticas exigem ao menos duas amostras e dinâmicas, três, além de evidência independente e confiança suficiente. |
 | Limites de frequência | Um snapshot por página e template confirmado; o servidor rejeita novas capturas no mesmo socket antes de três segundos e pedidos pessoais antes de quinze segundos. |
 | Planos de alto impacto | Níveis 2 e 3 continuam desativados, sem revisão humana ou execução de componentes avançados. |
 
@@ -893,7 +895,7 @@ O executor declarativo de nível 1 foi iniciado com as ações de tipografia,
 espaçamento, foco, links, limites visuais de controles, redução de movimento,
 áreas de toque e ajustes CSS declarativos. A API usa Gemini com saída JSON
 estruturada, remove qualquer ação fora do catálogo e grava apenas planos base
-derivados de duas amostras estruturais compatíveis. A extensão compila os planos
+derivados de uma família estrutural compatível e confiável. A extensão compila os planos
 em CSS próprio, cacheia o resultado localmente e nunca executa código fornecido
 pelo modelo.
 

@@ -10,6 +10,7 @@ function createDatabase() {
     query: async (sql) => {
       if (sql.includes("COUNT(DISTINCT origin_hash)")) return { rows: [{ total: 0, siteCount: 0, payloadBytes: 0, lastSeenAt: null }] };
       if (sql.includes("easyweb_site_snapshots")) return { rows: [] };
+      if (sql.includes("easyweb_adaptation_families")) return { rows: [{ total: 0, observing: 0, eligible: 0, ready: 0, noOpportunity: 0, averageConfidence: 0 }] };
       if (sql.includes("easyweb_adaptation_base_plans")) return { rows: [{ total: 0, active: 0, latestUpdateAt: null }] };
       if (sql.includes("GROUP BY state")) return { rows: [] };
       if (sql.includes("easyweb_adaptation_jobs")) return { rows: [] };

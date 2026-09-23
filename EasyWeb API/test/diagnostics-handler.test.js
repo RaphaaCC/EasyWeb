@@ -13,6 +13,9 @@ function createDatabase() {
       if (sql.includes("FROM easyweb_site_snapshots") && sql.includes("page_path")) {
         return { rows: [{ siteOrigin: "https://example.com", pagePath: "/account", captureCount: "2", payloadBytes: "1024", createdAt: "2026-09-22T11:00:00.000Z", lastSeenAt: "2026-09-22T12:00:00.000Z", payload: "must-not-leak" }] };
       }
+      if (sql.includes("FROM easyweb_adaptation_families")) {
+        return { rows: [{ total: "4", observing: "2", eligible: "1", ready: "1", noOpportunity: "1", averageConfidence: "0.81" }] };
+      }
       if (sql.includes("easyweb_adaptation_base_plans")) {
         return { rows: [{ total: "2", active: "1", latestUpdateAt: "2026-09-22T12:05:00.000Z" }] };
       }
@@ -40,6 +43,8 @@ test("publica somente métricas e metadados seguros no diagnóstico", async () =
   assert.equal(result.snapshots.total, 3);
   assert.equal(result.snapshots.latest[0].origin, "https://example.com");
   assert.equal(result.snapshots.latest[0].payload, undefined);
+  assert.equal(result.families.observing, 2);
+  assert.equal(result.families.averageConfidence, 0.81);
   assert.deepEqual(result.jobs.totals, { queued: 2 });
   assert.equal(result.jobs.latest[0].similarity, 0.92);
 });
