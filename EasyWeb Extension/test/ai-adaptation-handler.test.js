@@ -4,7 +4,41 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-function loadHandler() {
+function createRuntimeElement(overrides = {}) {
+  const attributes = new Map();
+  return {
+    isConnected: true,
+    parentElement: null,
+    computedStyle: {
+      color: "rgb(120, 120, 120)",
+      backgroundColor: "rgb(255, 255, 255)",
+      backgroundImage: "none",
+      display: "block",
+      visibility: "visible",
+      opacity: "1",
+      fontSize: "16px",
+      fontWeight: "400",
+      ...overrides
+    },
+    setAttribute(name, value) {
+      attributes.set(name, String(value));
+    },
+    getAttribute(name) {
+      return attributes.get(name) ?? null;
+    },
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
+    matches() {
+      return true;
+    },
+    querySelectorAll() {
+      return [];
+    }
+  };
+}
+
+function loadHandler({ runtimeElements = [] } = {}) {
   const elements = new Map();
   const observers = [];
   class FakeMutationObserver {
@@ -17,10 +51,29 @@ function loadHandler() {
 
     disconnect() {}
   }
+  const defaultStyles = {
+    color: "rgb(0, 0, 0)",
+    backgroundColor: "rgb(255, 255, 255)",
+    backgroundImage: "none",
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    fontSize: "16px",
+    fontWeight: "400"
+  };
   const root = {
+    isConnected: true,
+    parentElement: null,
+    computedStyle: defaultStyles,
     append(element) {
       element.isConnected = true;
       elements.set(element.id, element);
+    },
+    matches() {
+      return false;
+    },
+    querySelectorAll() {
+      return runtimeElements;
     }
   };
   const context = {
@@ -33,7 +86,13 @@ function loadHandler() {
       },
       getElementById(id) {
         return elements.get(id);
+      },
+      querySelectorAll() {
+        return [root];
       }
+    },
+    getComputedStyle(element) {
+      return element?.computedStyle || defaultStyles;
     },
     Date,
     Set,
@@ -217,4 +276,62 @@ test("compila uma cor pessoal somente a partir da paleta segura", () => {
     }
   });
   assert.equal(normalized.siteScript.steps[0].parameters.color, "#005fcc");
+});
+
+test("contrast-support escolhe uma cor que atinge contraste mensurável", () => {
+  const paragraph = createRuntimeElement({ color: "rgb(180, 180, 180)" });
+  const { handler, elements } = loadHandler({ runtimeElements: [paragraph] });
+  const plan = {
+    schemaVersion: 1,
+    planId: "personal:example:contrast",
+    planScope: "personal",
+    origin: "https://example.com",
+    siteScript: {
+      version: 1,
+      triggers: ["document-ready"],
+      steps: [{ type: "apply-style", target: "main-content", preset: "contrast-support", parameters: {} }]
+    }
+  };
+
+  assert.equal(handler.apply(plan).applied, true);
+  assert.equal(paragraph.getAttribute("data-easyweb-ai-personal-contrast"), "dark");
+  assert.match(elements.get("easyweb-ai-personal-style").textContent, /color: #000000 !important/);
+});
+
+test("text-color não aplica uma cor permitida quando ela falha no contraste do fundo", () => {
+  const paragraph = createRuntimeElement({ color: "rgb(0, 0, 0)", backgroundColor: "rgb(255, 255, 255)" });
+  const { handler } = loadHandler({ runtimeElements: [paragraph] });
+  const plan = {
+    schemaVersion: 1,
+    planId: "personal:example:white-on-white",
+    planScope: "personal",
+    origin: "https://example.com",
+    siteScript: {
+      version: 1,
+      triggers: ["document-ready"],
+      steps: [{ type: "apply-style", target: "document", preset: "text-color", parameters: { color: "#ffffff" } }]
+    }
+  };
+
+  assert.equal(handler.apply(plan).applied, true);
+  assert.equal(paragraph.getAttribute("data-easyweb-ai-personal-text-color"), null);
+});
+
+test("text-color aplica a cor pedida quando a combinação passa no contraste", () => {
+  const paragraph = createRuntimeElement({ color: "rgb(0, 0, 0)", backgroundColor: "rgb(255, 255, 255)" });
+  const { handler } = loadHandler({ runtimeElements: [paragraph] });
+  const plan = {
+    schemaVersion: 1,
+    planId: "personal:example:blue-on-white",
+    planScope: "personal",
+    origin: "https://example.com",
+    siteScript: {
+      version: 1,
+      triggers: ["document-ready"],
+      steps: [{ type: "apply-style", target: "document", preset: "text-color", parameters: { color: "#005fcc" } }]
+    }
+  };
+
+  assert.equal(handler.apply(plan).applied, true);
+  assert.equal(paragraph.getAttribute("data-easyweb-ai-personal-text-color"), "blue");
 });

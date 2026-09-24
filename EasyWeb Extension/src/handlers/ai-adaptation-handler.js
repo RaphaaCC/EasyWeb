@@ -1,5 +1,5 @@
 (() => {
-  const HANDLER_VERSION = 5;
+  const HANDLER_VERSION = 6;
   const SITE_SCRIPT_VERSION = 1;
   const MAX_STEPS = 8;
   const ALLOWED_TRIGGERS = new Set(["document-ready", "route-change"]);
@@ -25,6 +25,8 @@
     personal: "easyweb-ai-personal-style"
   });
   const activeCompiled = { base: null, personal: null };
+  const activePlans = { base: null, personal: null };
+  const runtimeAdjusted = { base: new Set(), personal: new Set() };
   let retentionObserver;
   let retainedHead;
   let retentionQueued = false;
@@ -48,6 +50,20 @@
   const NAVIGATION_SELECTOR = ':where(nav, [role="navigation"], [role="menubar"], [role="tablist"])';
   const FORM_SELECTOR = ':where(form, [role="form"])';
   const FORM_CONTROL_SELECTOR = ':where(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]):not([type=file]):not([type=color]), select, textarea)';
+  const TEXT_CANDIDATE_SELECTOR = [
+    "p", "span", "li", "dt", "dd", "th", "td", "label", "legend", "blockquote",
+    "h1", "h2", "h3", "h4", "h5", "h6", "a[href]", "button",
+    "input:not([type=hidden])", "select", "textarea", "summary",
+    "[role=button]", "[role=link]", "[role=menuitem]", "[role=tab]"
+  ].map((selector) => `:where(${selector})`).join(", ");
+  const TEXT_COLOR_ALIASES = Object.freeze({
+    "#005fcc": "blue",
+    "#b00020": "red",
+    "#006b3c": "green",
+    "#000000": "black",
+    "#ffffff": "white",
+    "#6a1b9a": "purple"
+  });
 
   function clamp(value, minimum, maximum, fallback = minimum) {
     const number = Number(value);
@@ -149,12 +165,169 @@
     return SELECTORS[scope] || SELECTORS.document;
   }
 
+  function parseColor(value) {
+    const match = String(value || "").trim().match(/^rgba?\((.+)\)$/i);
+    if (!match) return null;
+    const rawChannels = match[1].trim();
+    const channels = rawChannels.includes(",")
+      ? rawChannels.split(",").map((channel) => channel.trim())
+      : rawChannels.replace("/", " / ").split(/\s+/);
+    const separatorIndex = channels.indexOf("/");
+    const alphaValue = separatorIndex === -1 ? channels[3] : channels[separatorIndex + 1];
+    const colorChannels = separatorIndex === -1 ? channels.slice(0, 3) : channels.slice(0, separatorIndex);
+    if (colorChannels.length < 3) return null;
+    const values = colorChannels.map((channel) => channel.endsWith("%") ? Number(channel.slice(0, -1)) * 2.55 : Number(channel));
+    const alpha = alphaValue?.endsWith("%") ? Number(alphaValue.slice(0, -1)) / 100 : Number(alphaValue ?? 1);
+    if (values.some((channel) => !Number.isFinite(channel)) || !Number.isFinite(alpha)) return null;
+    return { r: values[0], g: values[1], b: values[2], a: alpha };
+  }
+
+  function hexColor(value) {
+    const match = String(value || "").match(/^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+    if (!match) return null;
+    return { r: Number.parseInt(match[1], 16), g: Number.parseInt(match[2], 16), b: Number.parseInt(match[3], 16), a: 1 };
+  }
+
+  function channelToLinear(channel) {
+    const normalized = channel / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  }
+
+  function luminance(color) {
+    return 0.2126 * channelToLinear(color.r) + 0.7152 * channelToLinear(color.g) + 0.0722 * channelToLinear(color.b);
+  }
+
+  function contrastRatio(first, second) {
+    const brightest = Math.max(luminance(first), luminance(second));
+    const darkest = Math.min(luminance(first), luminance(second));
+    return (brightest + 0.05) / (darkest + 0.05);
+  }
+
+  function blendWithBackground(foreground, background) {
+    const alpha = foreground.a;
+    return {
+      r: foreground.r * alpha + background.r * (1 - alpha),
+      g: foreground.g * alpha + background.g * (1 - alpha),
+      b: foreground.b * alpha + background.b * (1 - alpha),
+      a: 1
+    };
+  }
+
+  function effectiveBackground(element) {
+    for (let current = element; current; current = current.parentElement) {
+      const styles = getComputedStyle(current);
+      if (styles.backgroundImage && styles.backgroundImage !== "none") return null;
+      const color = parseColor(styles.backgroundColor);
+      if (color?.a >= 0.99) return color;
+      if (color && color.a > 0) return null;
+    }
+    return { r: 255, g: 255, b: 255, a: 1 };
+  }
+
+  function minimumContrast(element) {
+    const styles = getComputedStyle(element);
+    const fontSize = Number.parseFloat(styles.fontSize);
+    const numericWeight = Number.parseInt(styles.fontWeight, 10);
+    const weight = Number.isFinite(numericWeight) ? numericWeight : ["bold", "bolder"].includes(styles.fontWeight) ? 700 : 400;
+    const largeText = Number.isFinite(fontSize) && (fontSize >= 24 || (fontSize >= 18.66 && weight >= 700));
+    return largeText ? 3 : 4.5;
+  }
+
+  function isVisible(element) {
+    const styles = getComputedStyle(element);
+    return styles.display !== "none" && styles.visibility !== "hidden" && Number.parseFloat(styles.opacity || "1") !== 0;
+  }
+
+  function scopedTextElements(scope) {
+    const roots = scope === "document"
+      ? [document.documentElement].filter(Boolean)
+      : [...document.querySelectorAll(selectorFor(scope))];
+    const elements = [];
+    const seen = new Set();
+    const add = (element) => {
+      if (element && !seen.has(element)) {
+        seen.add(element);
+        elements.push(element);
+      }
+    };
+    for (const root of roots) {
+      if (root.matches?.(TEXT_CANDIDATE_SELECTOR)) add(root);
+      for (const element of root.querySelectorAll?.(TEXT_CANDIDATE_SELECTOR) || []) add(element);
+    }
+    return elements;
+  }
+
+  function runtimeAttribute(scope, kind) {
+    return `data-easyweb-ai-${scope}-${kind}`;
+  }
+
+  function clearRuntimeAdjustments(scope) {
+    const contrastAttribute = runtimeAttribute(scope, "contrast");
+    const textColorAttribute = runtimeAttribute(scope, "text-color");
+    for (const element of runtimeAdjusted[scope]) {
+      if (element.isConnected !== false) {
+        element.removeAttribute(contrastAttribute);
+        element.removeAttribute(textColorAttribute);
+      }
+    }
+    runtimeAdjusted[scope].clear();
+  }
+
+  function applyRuntimeAdjustments(scope, plan) {
+    clearRuntimeAdjustments(scope);
+    if (!plan?.siteScript?.steps?.length) return;
+    const contrastAttribute = runtimeAttribute(scope, "contrast");
+    const textColorAttribute = runtimeAttribute(scope, "text-color");
+    for (const step of plan.siteScript.steps) {
+      if (step.preset !== "contrast-support" && step.preset !== "text-color") continue;
+      for (const element of scopedTextElements(step.target)) {
+        if (!isVisible(element)) continue;
+        const background = effectiveBackground(element);
+        if (!background) continue;
+        const styles = getComputedStyle(element);
+        const opacity = Number.parseFloat(styles.opacity || "1");
+        const effectiveOpacity = Number.isFinite(opacity) ? opacity : 1;
+        const threshold = minimumContrast(element);
+
+        if (step.preset === "contrast-support") {
+          const parsedForeground = parseColor(styles.color);
+          if (!parsedForeground) continue;
+          const currentColor = blendWithBackground({ ...parsedForeground, a: parsedForeground.a * effectiveOpacity }, background);
+          const currentRatio = contrastRatio(currentColor, background);
+          if (currentRatio >= threshold) continue;
+          const candidates = [
+            { name: "dark", color: { r: 0, g: 0, b: 0, a: effectiveOpacity } },
+            { name: "light", color: { r: 255, g: 255, b: 255, a: effectiveOpacity } }
+          ].map((candidate) => ({
+            ...candidate,
+            ratio: contrastRatio(blendWithBackground(candidate.color, background), background)
+          })).sort((first, second) => second.ratio - first.ratio);
+          const best = candidates[0];
+          if (best.ratio >= threshold && best.ratio > currentRatio) {
+            element.setAttribute(contrastAttribute, best.name);
+            runtimeAdjusted[scope].add(element);
+          }
+          continue;
+        }
+
+        const requested = hexColor(step.parameters.color);
+        const alias = TEXT_COLOR_ALIASES[step.parameters.color];
+        if (!requested || !alias) continue;
+        const requestedEffective = blendWithBackground({ ...requested, a: effectiveOpacity }, background);
+        if (contrastRatio(requestedEffective, background) >= threshold) {
+          element.setAttribute(textColorAttribute, alias);
+          runtimeAdjusted[scope].add(element);
+        }
+      }
+    }
+  }
+
   function hasActionablePlan(plan) {
     const validPlan = validatePlan(plan);
     return Boolean(validPlan?.siteScript?.steps?.length);
   }
 
-  function compileStep(step) {
+  function compileStep(step, planScope) {
     const selector = selectorFor(step.target);
     const p = step.parameters;
     switch (step.preset) {
@@ -168,8 +341,10 @@
         return `${SELECTORS.links} { text-decoration-line: underline !important; text-decoration-thickness: max(2px, 0.12em) !important; text-underline-offset: 0.16em !important; }`;
       case "control-boundaries":
         return `${SELECTORS.controls} { border: ${p.width}px solid currentColor !important; }`;
-      case "contrast-support":
-        return `${SELECTORS["main-content"]} :where(p, li, dt, dd, th, td, label) { text-shadow: 0 0 0.01px currentColor; }`;
+      case "contrast-support": {
+        const attribute = runtimeAttribute(planScope, "contrast");
+        return `:where([${attribute}="dark"]) { color: #000000 !important; }\n:where([${attribute}="light"]) { color: #ffffff !important; }`;
+      }
       case "reduced-motion":
         return ":where(*, *::before, *::after) { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }";
       case "large-controls":
@@ -182,8 +357,11 @@
         return `${FORM_SELECTOR} :where(label, legend) { display: block !important; font-weight: 700 !important; line-height: 1.4 !important; margin-block-end: 0.35rem !important; }\n${FORM_SELECTOR} ${FORM_CONTROL_SELECTOR} { min-block-size: 44px !important; font-size: max(1em, 16px) !important; line-height: 1.3 !important; padding: max(0.45em, 6px) max(0.6em, 9px) !important; }`;
       case "heading-clarity":
         return `${SELECTORS["main-content"]} :where(h1, h2, h3, h4, h5, h6) { line-height: 1.22 !important; scroll-margin-block-start: 1rem !important; }\n${SELECTORS["main-content"]} :where(h2, h3, h4, h5, h6) { margin-block-start: 1.35em !important; }`;
-      case "text-color":
-        return `:where(body, main, article, section, header, footer, nav, aside, p, span, li, dt, dd, th, td, label, legend, blockquote, h1, h2, h3, h4, h5, h6) { color: ${p.color} !important; }`;
+      case "text-color": {
+        const alias = TEXT_COLOR_ALIASES[p.color];
+        const attribute = runtimeAttribute(planScope, "text-color");
+        return alias ? `:where([${attribute}="${alias}"]) { color: ${p.color} !important; }` : "";
+      }
       default:
         return "";
     }
@@ -192,7 +370,7 @@
   function compilePlan(plan) {
     const validPlan = validatePlan(plan);
     if (!validPlan) return null;
-    const css = validPlan.siteScript.steps.map(compileStep).filter(Boolean).join("\n");
+    const css = validPlan.siteScript.steps.map((step) => compileStep(step, validPlan.planScope)).filter(Boolean).join("\n");
     if (!css || css.length > 12_000) return null;
     return {
       css: `@layer easyweb-ai-${validPlan.planScope} {\n${css}\n}`,
@@ -223,6 +401,9 @@
       if (!style || style.dataset?.easywebAiPlan !== compiled.planId || style.textContent !== compiled.css) {
         installCompiledStyle(scope, compiled);
       }
+    }
+    for (const scope of Object.keys(activePlans)) {
+      if (activePlans[scope]) applyRuntimeAdjustments(scope, activePlans[scope]);
     }
   }
 
@@ -257,17 +438,22 @@
 
   function remove(scope) {
     activeCompiled[scope] = null;
+    activePlans[scope] = null;
+    clearRuntimeAdjustments(scope);
     document.getElementById(STYLE_IDS[scope])?.remove();
     if (!activeCompiled.base && !activeCompiled.personal) stopRetention();
   }
 
   function apply(plan) {
-    if (!validatePlan(plan)) return { applied: false, reason: "invalid-plan" };
-    if (!hasActionablePlan(plan)) return { applied: false, reason: "empty-plan" };
-    const compiled = compilePlan(plan);
+    const validPlan = validatePlan(plan);
+    if (!validPlan) return { applied: false, reason: "invalid-plan" };
+    if (!validPlan.siteScript.steps.length) return { applied: false, reason: "empty-plan" };
+    const compiled = compilePlan(validPlan);
     if (!compiled) return { applied: false, reason: "invalid-plan" };
     activeCompiled[compiled.planScope] = compiled;
+    activePlans[compiled.planScope] = validPlan;
     installCompiledStyle(compiled.planScope, compiled);
+    applyRuntimeAdjustments(compiled.planScope, validPlan);
     startRetention();
     return { applied: true, compiled };
   }
@@ -281,7 +467,9 @@
     }
     const compiled = { ...cached, planId: validPlan.planId, planScope: validPlan.planScope };
     activeCompiled[validPlan.planScope] = compiled;
+    activePlans[validPlan.planScope] = validPlan;
     installCompiledStyle(validPlan.planScope, compiled);
+    applyRuntimeAdjustments(validPlan.planScope, validPlan);
     startRetention();
     return { applied: true, compiled };
   }

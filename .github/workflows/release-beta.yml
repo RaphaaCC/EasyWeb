@@ -1,0 +1,61 @@
+name: Release beta
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-beta:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-beta]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            EasyWeb Extension/package-lock.json
+            EasyWeb API/package-lock.json
+
+      - name: Test extension
+        working-directory: EasyWeb Extension
+        run: |
+          npm ci
+          npm test
+
+      - name: Test API
+        working-directory: EasyWeb API
+        run: |
+          npm ci
+          npm test
+
+      - name: Create beta pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v1.0.0-beta.0
+          TITLE: EasyWeb v1.0.0 Beta (Development)
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            exit 0
+          fi
+          cat > release-notes.md <<'EOF'
+          ## EasyWeb v1.0.0 Beta
+
+          Primeira pre-release pública de desenvolvimento do EasyWeb.
+
+          ### Correções desta build
+          - sincroniza a versão do content script usada no fallback de reinjeção (#1);
+          - torna `contrast-support` um ajuste de contraste mensurável e calculado localmente (#4);
+          - impede `text-color` de aplicar combinações que não atinjam o contraste mínimo (#6);
+          - inclui a correção de compatibilidade estrutural do cache de adaptações (#3).
+
+          Esta versão é **beta / desenvolvimento** e ainda não deve ser tratada como uma versão estável.
+          EOF
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --prerelease --notes-file release-notes.md
