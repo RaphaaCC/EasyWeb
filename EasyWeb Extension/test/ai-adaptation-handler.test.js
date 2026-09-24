@@ -41,13 +41,16 @@ function createRuntimeElement(overrides = {}) {
 function loadHandler({ runtimeElements = [] } = {}) {
   const elements = new Map();
   const observers = [];
+  const observations = [];
   class FakeMutationObserver {
     constructor(callback) {
       this.callback = callback;
       observers.push(this);
     }
 
-    observe() {}
+    observe(target, options) {
+      observations.push({ target, options });
+    }
 
     disconnect() {}
   }
@@ -103,6 +106,11 @@ function loadHandler({ runtimeElements = [] } = {}) {
     Array,
     String
   };
+  context.setTimeout = (callback) => {
+    callback();
+    return 1;
+  };
+  context.clearTimeout = () => {};
   context.MutationObserver = FakeMutationObserver;
   context.globalThis = context;
   vm.runInNewContext(
@@ -112,6 +120,7 @@ function loadHandler({ runtimeElements = [] } = {}) {
   return {
     handler: context.EasyWebAiAdaptationHandler,
     elements,
+    observations,
     notifyDomMutation() {
       for (const observer of observers) observer.callback([]);
     }
@@ -143,6 +152,7 @@ test("compiles and installs a validated site script immediately", () => {
   assert.match(elements.get("easyweb-ai-base-style").textContent, /@layer easyweb-ai-base/);
   assert.match(elements.get("easyweb-ai-base-style").textContent, /1\.2/);
   assert.equal(applied.compiled.siteScriptVersion, 1);
+  assert.match(applied.compiled.css, /^@layer easyweb-ai-personal, easyweb-ai-base;/);
 });
 
 test("converts a cached legacy action plan without accepting arbitrary code", () => {
@@ -189,6 +199,51 @@ test("reinstalls an active style after a SPA replaces the document head", async 
   await Promise.resolve();
 
   assert.equal(elements.get("easyweb-ai-base-style").dataset.easywebAiPlan, plan.planId);
+});
+
+test("reaplica contraste em conteúdo adicionado dinamicamente por uma SPA", () => {
+  const runtimeElements = [];
+  const { handler, notifyDomMutation, observations } = loadHandler({ runtimeElements });
+  const plan = {
+    schemaVersion: 1,
+    planId: "base:example:dynamic-contrast",
+    planScope: "base",
+    origin: "https://example.com",
+    siteScript: {
+      version: 1,
+      triggers: ["document-ready", "route-change"],
+      steps: [{ type: "apply-style", target: "main-content", preset: "contrast-support", parameters: {} }]
+    }
+  };
+
+  assert.equal(handler.apply(plan).applied, true);
+  assert.equal(observations.some(({ options }) => options.childList && options.subtree), true);
+
+  const dynamicText = createRuntimeElement({ color: "rgb(190, 190, 190)" });
+  runtimeElements.push(dynamicText);
+  notifyDomMutation();
+
+  assert.equal(dynamicText.getAttribute("data-easyweb-ai-base-contrast"), "dark");
+});
+
+test("declara o plano pessoal com precedência sobre o plano base", () => {
+  const { handler } = loadHandler();
+  const createPlan = (scope, color) => ({
+    schemaVersion: 1,
+    planId: `${scope}:example:layers`,
+    planScope: scope,
+    origin: "https://example.com",
+    siteScript: {
+      version: 1,
+      triggers: ["document-ready"],
+      steps: [{ type: "apply-style", target: "document", preset: "text-color", parameters: { color } }]
+    }
+  });
+
+  const base = handler.compilePlan(createPlan("base", "#000000"));
+  const personal = handler.compilePlan(createPlan("personal", "#005fcc"));
+  assert.match(base.css, /^@layer easyweb-ai-personal, easyweb-ai-base;/);
+  assert.match(personal.css, /^@layer easyweb-ai-personal, easyweb-ai-base;/);
 });
 
 test("amplia visualmente os controles em um plano pessoal", () => {

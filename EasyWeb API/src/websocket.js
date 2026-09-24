@@ -196,6 +196,10 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, re
   }
 
   if (message.type === "easyweb:hello" && message.protocolVersion === PROTOCOL_VERSION) {
+    if (state.handshaken) {
+      socket.close(1008, "Handshake já concluído.");
+      return;
+    }
     if (!isInstallationId(message.installationId)) {
       socket.close(1008, "Instalação inválida.");
       return;

@@ -81,6 +81,37 @@ test("exige handshake antes de responder a heartbeat", async (context) => {
   assert.equal(await closed, 1008);
 });
 
+test("não permite trocar a instalação depois do handshake", async (context) => {
+  const server = createServer(createApp());
+  const webSocketServer = attachWebSocketServer(server);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const socket = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws`);
+  context.after(() => {
+    socket.close();
+    webSocketServer.close();
+    server.close();
+  });
+  await new Promise((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+
+  socket.send(JSON.stringify({
+    type: "easyweb:hello",
+    protocolVersion: 1,
+    installationId: "ca5ce777-31e1-4892-b93c-9d282b0732f7"
+  }));
+  await waitForMessage(socket);
+  const closed = new Promise((resolve) => socket.once("close", (code) => resolve(code)));
+  socket.send(JSON.stringify({
+    type: "easyweb:hello",
+    protocolVersion: 1,
+    installationId: "da5ce777-31e1-4892-b93c-9d282b0732f7"
+  }));
+
+  assert.equal(await closed, 1008);
+});
+
 test("recusa conexões WebSocket iniciadas por páginas Web", async (context) => {
   const server = createServer(createApp());
   const webSocketServer = attachWebSocketServer(server);

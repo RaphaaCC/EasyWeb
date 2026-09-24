@@ -201,6 +201,23 @@ test("cria um plano pessoal sem MySQL mesmo quando o cliente menciona um plano b
   assert.equal(databaseQueries, 0);
 });
 
+test("retorna indisponibilidade quando o serviço de snapshots pessoais não existe", async () => {
+  const service = createAdaptationService({
+    database: { configured: false },
+    gemini: { configured: true }
+  });
+
+  const result = await service.createPersonalPlan({
+    installationId: "ca5ce777-31e1-4892-b93c-9d282b0732f7",
+    origin: "https://example.com",
+    snapshot: createSnapshot({ tag: "main", landmark: true }),
+    profile: "default",
+    userRequest: { text: "Não consigo ler" }
+  });
+
+  assert.deepEqual(result, { state: "storage-unavailable" });
+});
+
 test("reforça um pedido pessoal de botões maiores quando a IA não escolhe controles", async () => {
   const snapshot = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "button", interactive: true }] });
   const service = createAdaptationService({

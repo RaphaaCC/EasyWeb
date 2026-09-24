@@ -1,5 +1,5 @@
 (() => {
-  const HANDLER_VERSION = 6;
+  const HANDLER_VERSION = 7;
   const SITE_SCRIPT_VERSION = 1;
   const MAX_STEPS = 8;
   const ALLOWED_TRIGGERS = new Set(["document-ready", "route-change"]);
@@ -30,6 +30,8 @@
   let retentionObserver;
   let retainedHead;
   let retentionQueued = false;
+  let retentionTimer;
+  const RETENTION_DELAY_MS = 60;
   const SELECTORS = Object.freeze({
     "main-content": ":where(main, article, [role=\"main\"])",
     "interactive-elements": ":where(a[href], button, input, select, textarea, summary, [role=\"button\"], [role=\"link\"])",
@@ -373,7 +375,9 @@
     const css = validPlan.siteScript.steps.map((step) => compileStep(step, validPlan.planScope)).filter(Boolean).join("\n");
     if (!css || css.length > 12_000) return null;
     return {
-      css: `@layer easyweb-ai-${validPlan.planScope} {\n${css}\n}`,
+      // Important declarations reverse layer precedence. Declaring personal
+      // first guarantees that a person's request wins over the base plan.
+      css: `@layer easyweb-ai-personal, easyweb-ai-base;\n@layer easyweb-ai-${validPlan.planScope} {\n${css}\n}`,
       handlerVersion: HANDLER_VERSION,
       planId: validPlan.planId,
       planScope: validPlan.planScope,
@@ -410,11 +414,11 @@
   function scheduleRetention() {
     if (retentionQueued) return;
     retentionQueued = true;
-    if (typeof queueMicrotask === "function") {
-      queueMicrotask(retainActiveStyles);
-      return;
-    }
-    Promise.resolve().then(retainActiveStyles);
+    clearTimeout(retentionTimer);
+    retentionTimer = setTimeout(() => {
+      retentionTimer = undefined;
+      retainActiveStyles();
+    }, RETENTION_DELAY_MS);
   }
 
   function startRetention() {
@@ -422,10 +426,9 @@
     if (retentionObserver && retainedHead === document.head) return;
     retentionObserver?.disconnect();
     retentionObserver = new MutationObserver(scheduleRetention);
-    retentionObserver.observe(document.documentElement, { childList: true });
-    if (document.head && document.head !== document.documentElement) {
-      retentionObserver.observe(document.head, { childList: true });
-    }
+    // SPAs usually replace descendants inside body without replacing body
+    // itself. Watching the subtree keeps runtime contrast attributes current.
+    retentionObserver.observe(document.documentElement, { childList: true, subtree: true });
     retainedHead = document.head;
   }
 
@@ -434,6 +437,8 @@
     retentionObserver = undefined;
     retainedHead = undefined;
     retentionQueued = false;
+    clearTimeout(retentionTimer);
+    retentionTimer = undefined;
   }
 
   function remove(scope) {
@@ -462,7 +467,7 @@
     const validPlan = validatePlan(plan);
     if (!validPlan || !validPlan.siteScript.steps.length || !isPlainObject(cached) || cached.handlerVersion !== HANDLER_VERSION ||
       cached.siteScriptVersion !== SITE_SCRIPT_VERSION || typeof cached.css !== "string" || cached.css.length > 12_000 ||
-      !cached.css.startsWith(`@layer easyweb-ai-${validPlan.planScope} {`)) {
+      !cached.css.startsWith(`@layer easyweb-ai-personal, easyweb-ai-base;\n@layer easyweb-ai-${validPlan.planScope} {`)) {
       return { applied: false, reason: "invalid-cache" };
     }
     const compiled = { ...cached, planId: validPlan.planId, planScope: validPlan.planScope };

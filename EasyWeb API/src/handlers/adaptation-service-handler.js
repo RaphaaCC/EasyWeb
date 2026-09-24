@@ -834,6 +834,7 @@ export function createAdaptationService({ database, gemini, aiQueue, now = () =>
     snapshotStore
   }) {
     if (!gemini?.configured) return { state: "model-unavailable" };
+    if (typeof snapshotStore?.prepare !== "function") return { state: "storage-unavailable" };
     const request = normalizePersonalRequest(userRequest);
     if (!request) return { state: "invalid-personal-request" };
     const basePlan = database?.configured && typeof basePlanId === "string" && basePlanId

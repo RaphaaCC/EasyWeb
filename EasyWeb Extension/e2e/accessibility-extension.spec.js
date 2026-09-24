@@ -134,7 +134,7 @@ test("mantém a página de configurações navegável na versão beta", async ()
   await page.goto(`chrome-extension://${extensionId}/options.html`);
 
   await expect(page.locator("#profile-grid .profile-card")).toHaveCount(9);
-  await expect(page.locator("footer")).toContainText("v1.0.0 Beta");
+  await expect(page.locator("footer")).toContainText("v1.0.1 Beta");
   await expect(page.locator(".api-section")).toBeHidden();
 
   await page.locator('input[name="operation-mode"][value="enhanced"]').check();
