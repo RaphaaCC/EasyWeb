@@ -1,6 +1,6 @@
 # Planejamento: IA para Experiência Adaptativa do EasyWeb
 
-> **Status:** implementação inicial em andamento na versão `0.1.0-development`. O nível 1 já possui contrato WebSocket, armazenamento de planos base, integração com Gemini, validação de um catálogo fechado de ações, compilação local de CSS e cache local. Os recursos de níveis 2 e 3 continuam somente planejados.
+> **Status:** implementação beta em andamento na versão `v1.0.0 Beta`. O nível 1 já possui contrato WebSocket, armazenamento de planos base, integração com Gemini, validação de um catálogo fechado de ações, compilação local de CSS e cache local. Os recursos de níveis 2 e 3 continuam somente planejados.
 >
 > **Objetivo:** permitir que o EasyWeb use IA para recomendar e aplicar adaptações de acessibilidade e simplificação de navegação por site, de maneira reversível, verificável e controlada pelo usuário.
 
@@ -758,7 +758,7 @@ O WebSocket já serve para snapshots. A evolução pode usar as seguintes mensag
 { "type": "easyweb:adaptation:outcome", "origin": "https://exemplo.gov.br", "adaptationFingerprint": "...", "planId": "...", "result": "applied|rolled-back|helpful|unhelpful", "technicalReason": "optional" }
 ```
 
-O backend nunca deve transmitir instruções executáveis. Ele entrega apenas planos JSON previamente validados e associados à família de páginas correta. Mensagens de plano pessoal são enviadas apenas ao socket autenticado da instalação que fez o pedido.
+O backend nunca deve transmitir instruções executáveis. Ele entrega apenas planos JSON previamente validados e associados à família de páginas correta. Mensagens de plano pessoal são enviadas apenas à conexão WebSocket que fez o pedido.
 
 ### 16.1 Persistência prevista na API
 
@@ -887,7 +887,7 @@ Um plano só é considerado pronto quando:
 | Limites de frequência | Um snapshot por página e template confirmado; o servidor rejeita novas capturas no mesmo socket antes de três segundos e pedidos pessoais antes de quinze segundos. |
 | Planos de alto impacto | Níveis 2 e 3 continuam desativados, sem revisão humana ou execução de componentes avançados. |
 
-Ainda precisam de uma decisão de produto antes de uma publicação ampla: política de retenção do MySQL, páginas que devem ser permanentemente excluídas, tempo máximo de resposta e regras da prévia/reversão automática.
+O nível atual possui retenção de snapshots configurável pela API, exclusão sob demanda pelo identificador local da extensão e limpeza de planos/famílias que perderem suas fontes. Antes de uma publicação ampla, ainda será necessário definir o tempo máximo de resposta e as regras da prévia/reversão automática.
 
 ## 22. Estado da implementação inicial
 

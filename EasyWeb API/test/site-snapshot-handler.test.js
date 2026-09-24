@@ -81,6 +81,16 @@ test("rejeita caminho com parâmetros ou fragmentos", async () => {
   );
 });
 
+test("remove identificadores dinâmicos do caminho antes de persistir", () => {
+  const handler = createSiteSnapshotHandler();
+  const snapshot = createSnapshot();
+  snapshot.page.path = "/conta/ana%40example.com/pedido/123456";
+
+  const prepared = handler.prepare({ installationId: "installation-123456", snapshot });
+
+  assert.equal(prepared.normalized.page.path, "/conta/:private/pedido/:id");
+});
+
 test("filtra HTML e CSS sensíveis sem rejeitar um snapshot estrutural", async () => {
   const calls = [];
   const handler = createSiteSnapshotHandler({

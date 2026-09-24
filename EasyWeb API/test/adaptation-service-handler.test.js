@@ -160,6 +160,109 @@ test("cria um plano pessoal direto sem exigir um plano base", async () => {
   assert.equal(generatedRequests[0].basePlan, null);
 });
 
+test("cria um plano pessoal sem MySQL mesmo quando o cliente menciona um plano base antigo", async () => {
+  const snapshot = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "p" }] });
+  let databaseQueries = 0;
+  const service = createAdaptationService({
+    database: {
+      configured: false,
+      query: async () => {
+        databaseQueries += 1;
+        throw new Error("Banco não deveria ser consultado.");
+      }
+    },
+    gemini: {
+      configured: true,
+      generate: async () => ({
+        confidence: 0.8,
+        summary: "Leitura mais confortável.",
+        siteScript: {
+          version: 1,
+          triggers: ["document-ready"],
+          steps: [{ type: "apply-style", target: "main-content", preset: "readable-text", parameters: { scale: 1.15 } }]
+        }
+      }),
+      normalizeGeneratedPlan: () => null
+    }
+  });
+
+  const result = await service.createPersonalPlan({
+    installationId: "ca5ce777-31e1-4892-b93c-9d282b0732f7",
+    origin: "https://example.com",
+    snapshot,
+    basePlanId: "base:inexistente:v1",
+    profile: "default",
+    userRequest: { text: "Não consigo ler esta página" },
+    snapshotStore: { prepare: ({ snapshot: value }) => ({ normalized: value }) }
+  });
+
+  assert.equal(result.state, "ready");
+  assert.equal(result.plan.basePlanId, null);
+  assert.equal(databaseQueries, 0);
+});
+
+test("reforça um pedido pessoal de botões maiores quando a IA não escolhe controles", async () => {
+  const snapshot = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "button", interactive: true }] });
+  const service = createAdaptationService({
+    database: { configured: true, query: async () => ({ rows: [] }) },
+    gemini: {
+      configured: true,
+      generate: async () => ({
+        confidence: 0.7,
+        summary: "Melhoria genérica.",
+        siteScript: {
+          version: 1,
+          triggers: ["document-ready"],
+          steps: [{ type: "apply-style", target: "links", preset: "link-clarity", parameters: {} }]
+        }
+      }),
+      normalizeGeneratedPlan: () => null
+    }
+  });
+
+  const result = await service.createPersonalPlan({
+    installationId: "ca5ce777-31e1-4892-b93c-9d282b0732f7",
+    origin: "https://example.com",
+    snapshot,
+    profile: "default",
+    userRequest: { text: "Aumente o tamanho dos botões" },
+    snapshotStore: { prepare: ({ snapshot: value }) => ({ normalized: value }) }
+  });
+
+  assert.equal(result.state, "ready");
+  assert.equal(result.plan.siteScript.steps.some((step) =>
+    step.target === "controls" && step.preset === "large-controls" && step.parameters.minimumSize === 48), true);
+});
+
+test("transforma um pedido explícito de cor em uma alteração de texto segura", async () => {
+  const snapshot = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "p" }] });
+  const service = createAdaptationService({
+    database: { configured: true, query: async () => ({ rows: [] }) },
+    gemini: {
+      configured: true,
+      generate: async () => ({
+        confidence: 0.7,
+        summary: "Melhoria genérica.",
+        siteScript: { version: 1, triggers: ["document-ready"], steps: [] }
+      }),
+      normalizeGeneratedPlan: () => null
+    }
+  });
+
+  const result = await service.createPersonalPlan({
+    installationId: "ca5ce777-31e1-4892-b93c-9d282b0732f7",
+    origin: "https://example.com",
+    snapshot,
+    profile: "default",
+    userRequest: { text: "Quero o texto da página azul" },
+    snapshotStore: { prepare: ({ snapshot: value }) => ({ normalized: value }) }
+  });
+
+  assert.equal(result.state, "ready");
+  assert.equal(result.plan.siteScript.steps.some((step) =>
+    step.preset === "text-color" && step.parameters.color === "#005fcc"), true);
+});
+
 test("entrega um plano ativo do mesmo site quando as observações atuais ainda não são confiáveis", async () => {
   const snapshot = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "h1", headingLevel: 1 }] });
   const storedPlan = {

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "EasyWeb",
   "description": "Tornando a Web mais democrática e acessível para todos",
-  "version": "0.1.0",
-  "version_name": "0.1.0-development",
+  "version": "1.0.0",
+  "version_name": "v1.0.0 Beta",
   "action": {
     "default_title": "EasyWeb",
     "default_popup": "popup.html"

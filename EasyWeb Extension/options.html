@@ -120,8 +120,10 @@
         </label>
         <div class="mapping-policy" aria-labelledby="mapping-policy-title">
           <strong id="mapping-policy-title">Regras de segurança</strong>
-          <p>O mapeamento envia HTML estrutural sem textos ou atributos pessoais e CSS sanitizado, além de metadados de scripts. Cookies, valores de formulários, URLs completas de assets, senhas e corpos de scripts são bloqueados. Páginas com campos de acesso ou pagamento não são mapeadas.</p>
+          <p>O mapeamento envia HTML estrutural sem textos ou atributos pessoais e CSS sanitizado, além de metadados de scripts. Cookies, valores de formulários, URLs completas de assets, senhas, campos sensíveis e corpos de scripts são removidos antes do envio.</p>
         </div>
+        <button id="delete-remote-snapshots" class="secondary-action" type="button">Remover snapshots desta instalação</button>
+        <p class="api-status" id="snapshot-deletion-status" role="status" aria-live="polite"></p>
       </section>
 
       <section class="ai-section" aria-labelledby="ai-title">
@@ -143,7 +145,7 @@
         </div>
       </section>
 
-      <footer>2026 EasyWeb © Todos os Direitos Reservados | 0.1.0-development</footer>
+      <footer>2026 EasyWeb © Todos os Direitos Reservados | v1.0.0 Beta</footer>
     </main>
     <script src="src/handlers/settings-handler.js"></script>
     <script src="src/options.js"></script>

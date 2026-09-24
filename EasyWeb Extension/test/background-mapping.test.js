@@ -14,7 +14,9 @@ function loadBackground() {
   });
   const sockets = [];
   const tabMessages = [];
+  const intervals = new Map();
   let messageListener;
+  let nextTimerId = 0;
   let clock = 1_000_000;
 
   class FakeDate extends Date {
@@ -94,13 +96,19 @@ function loadBackground() {
     Error,
     crypto: require("node:crypto").webcrypto,
     WebSocket: FakeWebSocket,
-    setTimeout: () => 1,
+    setTimeout: () => ++nextTimerId,
     clearTimeout: () => {},
-    setInterval: () => 1,
-    clearInterval: () => {},
+    setInterval(callback) {
+      const id = ++nextTimerId;
+      intervals.set(id, callback);
+      return id;
+    },
+    clearInterval(id) {
+      intervals.delete(id);
+    },
     chrome: {
       runtime: {
-        getManifest: () => ({ version_name: "0.1.0-development" }),
+        getManifest: () => ({ version_name: "v1.0.0 Beta" }),
         onMessage: { addListener(listener) { messageListener = listener; } },
         onStartup: { addListener() {} }
       },
@@ -151,6 +159,9 @@ function loadBackground() {
     FakeWebSocket,
     advance(milliseconds) {
       clock += milliseconds;
+    },
+    runIntervals() {
+      for (const callback of [...intervals.values()]) callback();
     }
   };
 }
@@ -216,6 +227,17 @@ test("revalida um template confirmado quando a observação fica antiga", async 
   });
   assert.equal(stale.state, "sending");
   assert.equal(socket.sent.filter((item) => item.type === "easyweb:mapping:snapshot").length, 2);
+});
+
+test("reconecta quando a API deixa de responder ao heartbeat", async () => {
+  const harness = loadBackground();
+  await settle();
+  const socket = await openAndHandshake(harness);
+
+  harness.advance(45_001);
+  harness.runIntervals();
+
+  assert.equal(socket.readyState, 3);
 });
 
 test("consulta uma adaptação existente sem exigir um novo snapshot", async () => {
@@ -292,4 +314,106 @@ test("retries an adaptation lookup immediately after an API error", async () => 
     origin: "https://example.com"
   });
   assert.equal(socket.sent.filter((item) => item.type === "easyweb:adaptation:lookup").length, 2);
+});
+
+test("persiste e entrega um plano pessoal depois de um status de fila", async () => {
+  const harness = loadBackground();
+  harness.storage["easyweb:ai-recommendations-enabled"] = true;
+  await settle();
+  const socket = await openAndHandshake(harness);
+  const requestId = "44444444-4444-4444-8444-444444444444";
+  const request = await harness.dispatch({
+    type: "easyweb:adaptation:personal-request",
+    requestId,
+    snapshot: { captureVersion: 1, page: { origin: "https://example.com", path: "/" } },
+    profile: "elderly",
+    userRequest: { text: "Aumente o tamanho dos botões", intentTags: ["small-controls"] }
+  });
+  assert.equal(request.accepted, true);
+  assert.equal(socket.sent.some((item) => item.type === "easyweb:adaptation:personal-request"), true);
+
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "easyweb:adaptation:personal-status",
+      requestId,
+      origin: "https://example.com",
+      state: "queued"
+    })
+  });
+  await settle();
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "easyweb:adaptation:personal-plan",
+      requestId,
+      origin: "https://example.com",
+      plan: {
+        schemaVersion: 1,
+        planId: "personal:example:buttons",
+        planScope: "personal",
+        origin: "https://example.com",
+        profile: "elderly",
+        siteScript: { version: 1, triggers: ["document-ready"], steps: [] }
+      }
+    })
+  });
+  await settle();
+
+  assert.equal(Object.values(harness.storage).some((value) => value?.plan?.planId === "personal:example:buttons"), true);
+  assert.equal(harness.tabMessages.some((entry) => entry.message.type === "easyweb:apply-ai-personal-plan" &&
+    entry.message.profileId === "elderly"), true);
+});
+
+test("isola o status de um pedido pessoal de erros e consultas automáticas", async () => {
+  const harness = loadBackground();
+  harness.storage["easyweb:ai-recommendations-enabled"] = true;
+  await settle();
+  const socket = await openAndHandshake(harness);
+  const requestId = "55555555-5555-4555-8555-555555555555";
+
+  const request = await harness.dispatch({
+    type: "easyweb:adaptation:personal-request",
+    requestId,
+    snapshot: { captureVersion: 1, page: { origin: "https://example.com", path: "/" } },
+    profile: "default",
+    userRequest: { text: "Quero o texto mais legível", intentTags: ["reading-difficulty"] }
+  });
+  assert.equal(request.accepted, true);
+
+  const statusBeforeLookupError = harness.tabMessages.length;
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "easyweb:adaptation:error",
+      origin: "https://example.com",
+      reason: "Falha transitória da consulta automática."
+    })
+  });
+  await settle();
+  assert.equal(harness.tabMessages.length, statusBeforeLookupError);
+
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "easyweb:adaptation:status",
+      origin: "https://example.com",
+      state: "awaiting-second-snapshot"
+    })
+  });
+  await settle();
+  assert.equal(harness.tabMessages.at(-1).message.status.scope, "base");
+
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "easyweb:adaptation:personal-status",
+      requestId,
+      origin: "https://example.com",
+      state: "model-temporarily-unavailable"
+    })
+  });
+  await settle();
+
+  assert.equal(JSON.stringify(harness.tabMessages.at(-1).message.status), JSON.stringify({
+    state: "model-temporarily-unavailable",
+    scope: "personal",
+    requestId,
+    message: "A IA demorou para responder ou está temporariamente indisponível. Tente novamente em alguns instantes."
+  }));
 });

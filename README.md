@@ -2,7 +2,7 @@
 
 > Tornando a Web mais democrática e acessível para todas as pessoas.
 
-![Versão](https://img.shields.io/badge/versão-0.1.0--development-00a99d?style=flat-square)
+![Versão](https://img.shields.io/badge/versão-v1.0.0%20Beta-00a99d?style=flat-square)
 ![Licença](https://img.shields.io/badge/licença-MIT-2563eb?style=flat-square)
 ![Chrome](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)
@@ -66,9 +66,9 @@ Nunca envie ao repositório o arquivo `.env`, chaves Gemini, senhas MySQL ou tok
 
 ## Privacidade e IA
 
-O modo Aprimorado exige consentimento global e também pode exigir consentimento por site. O snapshot contém apenas a estrutura da página, metadados de estilo e informações agregadas de scripts. Textos, atributos, valores de formulários, cookies, credenciais e código JavaScript não fazem parte do payload persistido.
+O modo Aprimorado exige consentimento global e autorização individual para cada site. O snapshot contém apenas a estrutura da página, metadados de estilo e informações agregadas de scripts. Textos, atributos, valores de formulários, cookies, credenciais e código JavaScript não fazem parte do payload persistido.
 
-Quando habilitada, a IA recebe snapshots protegidos e devolve um plano limitado a presets conhecidos, como legibilidade, foco, espaçamento e limites visuais de controles. A extensão valida o plano e compila sua própria camada CSS. Planos base podem ser armazenados pela API; pedidos pessoais permanecem apenas na extensão que os solicitou.
+Quando habilitada, a IA recebe snapshots protegidos e devolve um plano limitado a presets conhecidos, como legibilidade, títulos, navegação, formulários, foco, espaçamento, controles visualmente maiores e cores de texto de uma paleta segura. A extensão valida o plano e compila sua própria camada CSS. As chamadas ao Gemini entram em uma fila serial, com prioridade para pedidos pessoais do popup; planos base podem ser armazenados pela API, enquanto pedidos pessoais permanecem apenas na extensão que os solicitou.
 
 ## Testes
 
@@ -80,6 +80,10 @@ node --test test\*.test.js
 # API
 cd "..\EasyWeb API"
 npm test
+
+# Navegador (Playwright, extensão carregada sem compactação)
+cd "..\EasyWeb Extension"
+npm run test:e2e
 ```
 
 Consulte o README e os documentos de cada projeto para detalhes de arquitetura, configuração e protocolo WebSocket.

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { gunzipSync } from "node:zlib";
+import { createAiRequestQueue } from "./ai-request-queue-handler.js";
 
 const FAMILY_SIMILARITY_THRESHOLD = 0.72;
 const MAX_CANDIDATE_SNAPSHOTS = 8;
@@ -13,6 +14,37 @@ const DYNAMIC_FAMILY_THRESHOLD = 0.45;
 const MIN_OPPORTUNITY_SCORE = 0.15;
 const MAX_BASE_JOB_ATTEMPTS = 4;
 const STALE_JOB_LOCK_MINUTES = 5;
+const MAX_SITE_SCRIPT_STEPS = 8;
+const PERSONAL_INTENT_TAGS = new Set([
+  "reading-difficulty",
+  "navigation-confusion",
+  "small-controls",
+  "form-difficulty",
+  "low-contrast",
+  "text-color"
+]);
+const PERSONAL_INTENT_PRESETS = Object.freeze({
+  "reading-difficulty": new Set(["readable-text", "reading-spacing", "content-width", "heading-clarity"]),
+  "navigation-confusion": new Set(["navigation-clarity", "focus-ring", "link-clarity", "control-boundaries"]),
+  "small-controls": new Set(["large-controls"]),
+  "form-difficulty": new Set(["form-legibility"]),
+  "low-contrast": new Set(["contrast-support", "link-clarity", "control-boundaries"]),
+  "text-color": new Set(["text-color"])
+});
+const PERSONAL_TEXT_COLORS = Object.freeze({
+  azul: "#005fcc",
+  blue: "#005fcc",
+  vermelho: "#b00020",
+  red: "#b00020",
+  verde: "#006b3c",
+  green: "#006b3c",
+  preto: "#000000",
+  black: "#000000",
+  branco: "#ffffff",
+  white: "#ffffff",
+  roxo: "#6a1b9a",
+  purple: "#6a1b9a"
+});
 
 function hash(value) {
   return createHash("sha256").update(value).digest();
@@ -324,8 +356,118 @@ function createServiceError(code, retryable) {
   return error;
 }
 
-export function createAdaptationService({ database, gemini, now = () => new Date() } = {}) {
+function normalizedSearchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function inferPersonalIntentTags(text) {
+  const source = normalizedSearchText(text);
+  const tags = [];
+  if (/(?:nao consigo ler|leitura|texto|fonte|letras?|legibil)/.test(source)) {
+    tags.push("reading-difficulty");
+  }
+  if (/(?:navega|menu|confus|encontrar|organiz)/.test(source)) {
+    tags.push("navigation-confusion");
+  }
+  if (/(?:bot(?:ao|oes)|button|controles?|clic(?:ar|avel|aveis)|toque|alvo)/.test(source)) {
+    tags.push("small-controls");
+  }
+  if (/(?:\bformulario\b|\bform\b|\bcampo(?:s)?\b|\bpreench|\bcadastro\b|\bdigitar\b)/.test(source)) {
+    tags.push("form-difficulty");
+  }
+  if (/(?:\bcontraste\b|\bcores?\b|\bescuro\b|\bclaro\b|\bvisibil)/.test(source)) {
+    tags.push("low-contrast");
+  }
+  if (/(?:texto|letras?|fonte).{0,40}(?:azul|blue|vermelh|red|verde|green|pret|black|branc|white|rox|purple)|(?:azul|blue|vermelh|red|verde|green|pret|black|branc|white|rox|purple).{0,40}(?:texto|letras?|fonte)/.test(source)) {
+    tags.push("text-color");
+  }
+  return tags;
+}
+
+function requestedTextColor(text) {
+  const source = normalizedSearchText(text);
+  const match = Object.keys(PERSONAL_TEXT_COLORS).find((name) => source.includes(name));
+  return PERSONAL_TEXT_COLORS[match] || "#005fcc";
+}
+
+function fallbackStepsForIntent(tag, request) {
+  switch (tag) {
+    case "reading-difficulty":
+      return [
+        { type: "apply-style", target: "main-content", preset: "readable-text", parameters: { scale: 1.18 } },
+        { type: "apply-style", target: "main-content", preset: "reading-spacing", parameters: { lineHeight: 1.7, letterSpacing: 0.35 } },
+        { type: "apply-style", target: "main-content", preset: "heading-clarity", parameters: {} }
+      ];
+    case "navigation-confusion":
+      return [
+        { type: "apply-style", target: "document", preset: "navigation-clarity", parameters: {} },
+        { type: "apply-style", target: "links", preset: "link-clarity", parameters: {} },
+        { type: "apply-style", target: "interactive-elements", preset: "focus-ring", parameters: { width: 3, offset: 3 } }
+      ];
+    case "small-controls":
+      return [{ type: "apply-style", target: "controls", preset: "large-controls", parameters: { minimumSize: 48 } }];
+    case "form-difficulty":
+      return [
+        { type: "apply-style", target: "controls", preset: "form-legibility", parameters: {} },
+        { type: "apply-style", target: "interactive-elements", preset: "focus-ring", parameters: { width: 3, offset: 3 } }
+      ];
+    case "low-contrast":
+      return [
+        { type: "apply-style", target: "main-content", preset: "contrast-support", parameters: {} },
+        { type: "apply-style", target: "links", preset: "link-clarity", parameters: {} }
+      ];
+    case "text-color":
+      return [{
+        type: "apply-style",
+        target: "document",
+        preset: "text-color",
+        parameters: { color: requestedTextColor(request?.text) }
+      }];
+    default:
+      return [];
+  }
+}
+
+function ensurePersonalRequestCoverage(generated, request) {
+  const steps = [...(generated?.siteScript?.steps || [])];
+  const requestedTags = request?.intentTags || [];
+  const allRequiredPresets = new Set(requestedTags.flatMap((tag) => [...(PERSONAL_INTENT_PRESETS[tag] || [])]));
+
+  for (const tag of requestedTags) {
+    const requiredPresets = PERSONAL_INTENT_PRESETS[tag];
+    if (!requiredPresets || steps.some((step) => requiredPresets.has(step.preset))) continue;
+    for (const fallback of fallbackStepsForIntent(tag, request)) {
+      if (steps.some((step) => step.target === fallback.target && step.preset === fallback.preset)) continue;
+      if (steps.length >= MAX_SITE_SCRIPT_STEPS) {
+        const replaceAt = steps.findIndex((step) => !allRequiredPresets.has(step.preset));
+        if (replaceAt < 0) break;
+        steps.splice(replaceAt, 1);
+      }
+      steps.push(fallback);
+    }
+  }
+
+  return {
+    ...generated,
+    siteScript: { ...generated.siteScript, steps: steps.slice(0, MAX_SITE_SCRIPT_STEPS) }
+  };
+}
+
+export function createAdaptationService({ database, gemini, aiQueue, now = () => new Date() } = {}) {
   const basePlanListeners = new Set();
+  const requestQueue = typeof aiQueue?.enqueue === "function" ? aiQueue : createAiRequestQueue();
+
+  function generateWithQueue(type, request, payload) {
+    return requestQueue.enqueue({
+      type,
+      origin: payload.origin,
+      request: type === "personal" ? request?.text : "",
+      execute: () => gemini.generate(payload)
+    });
+  }
 
   function publishBasePlan(origin, plan) {
     for (const listener of basePlanListeners) {
@@ -478,20 +620,33 @@ export function createAdaptationService({ database, gemini, now = () => new Date
     return plan;
   }
 
+  async function markFamilyReady(familyId) {
+    await database.query(
+      "UPDATE easyweb_adaptation_families SET status = 'ready', last_evaluated_at = UTC_TIMESTAMP() WHERE id = ?",
+      [familyId]
+    );
+  }
+
   async function createBasePlan(origin, candidate) {
     const { pair, adaptationFingerprint } = candidate;
     const existing = await loadActivePlan(adaptationFingerprint, origin);
-    if (existing) return existing;
+    if (existing) {
+      const existingFamilyId = await persistFamily(origin, candidate, "eligible");
+      if (existingFamilyId) await markFamilyReady(existingFamilyId);
+      return existing;
+    }
     if (!gemini?.configured) throw createServiceError("EASYWEB_GEMINI_UNAVAILABLE", false);
-    const familyId = await persistFamily(origin, candidate, "ready");
+    const familyId = await persistFamily(origin, candidate, "eligible");
     if (!familyId) throw createServiceError("EASYWEB_ADAPTATION_FAMILY_UNAVAILABLE", true);
-    const generated = await gemini.generate({
+    const generated = await generateWithQueue("base", null, {
       origin,
       planScope: "base",
       profile: "universal",
       snapshots: [pair.left.snapshot, pair.right.snapshot]
     });
-    return persistPlan({ origin, candidate, familyId, generated });
+    const plan = await persistPlan({ origin, candidate, familyId, generated });
+    await markFamilyReady(familyId);
+    return plan;
   }
 
   async function enqueueBaseAnalysis(origin, pair, adaptationFingerprint) {
@@ -658,9 +813,10 @@ export function createAdaptationService({ database, gemini, now = () => new Date
       .replace(/(?:\d[ -]?){13,19}/g, "[dado removido]")
       .replace(/\b\d{3}[.-]?\d{3}[.-]?\d{3}[.-]?\d{2}\b/g, "[dado removido]");
     if (!text || text.length > 280) return null;
-    const intentTags = Array.isArray(value.intentTags)
-      ? value.intentTags.filter((tag) => ["reading-difficulty", "navigation-confusion", "small-controls", "low-contrast"].includes(tag)).slice(0, 4)
+    const suppliedTags = Array.isArray(value.intentTags)
+      ? value.intentTags.filter((tag) => PERSONAL_INTENT_TAGS.has(tag))
       : [];
+    const intentTags = [...new Set([...suppliedTags, ...inferPersonalIntentTags(text)])].slice(0, 4);
     return { text, intentTags };
   }
 
@@ -696,12 +852,14 @@ export function createAdaptationService({ database, gemini, now = () => new Date
     if (!gemini?.configured) return { state: "model-unavailable" };
     const request = normalizePersonalRequest(userRequest);
     if (!request) return { state: "invalid-personal-request" };
-    const basePlan = typeof basePlanId === "string" && basePlanId ? await loadBasePlanById(basePlanId, origin) : null;
+    const basePlan = database?.configured && typeof basePlanId === "string" && basePlanId
+      ? await loadBasePlanById(basePlanId, origin)
+      : null;
     const prepared = snapshotStore.prepare({ installationId, snapshot });
     if (prepared.normalized.page.origin !== origin) return { state: "invalid-personal-request" };
     let generated;
     try {
-      generated = await gemini.generate({
+      generated = await generateWithQueue("personal", request, {
         origin,
         planScope: "personal",
         profile: typeof profile === "string" ? profile.slice(0, 64) : "default",
@@ -714,21 +872,24 @@ export function createAdaptationService({ database, gemini, now = () => new Date
       if (error?.retryable) return { state: "model-temporarily-unavailable" };
       throw error;
     }
+    const covered = ensurePersonalRequestCoverage(generated, request);
+    if (!covered.siteScript.steps.length) {
+      return { state: "no-compatible-adjustment" };
+    }
     return {
       state: "ready",
       plan: {
         schemaVersion: 1,
-        planId: `personal:${basePlan?.planId || "direct"}:${Date.now().toString(36)}`,
+        planId: `personal:${basePlan?.planId || "direct"}:${Date.now().toString(36)}:${randomBytes(4).toString("hex")}`,
         planScope: "personal",
         origin,
         basePlanId: basePlan?.planId || null,
-        installationScope: hash(installationId).toString("hex"),
         adaptationFingerprint: basePlan?.adaptationFingerprint || null,
         profile: typeof profile === "string" ? profile.slice(0, 64) : "default",
-        confidence: generated.confidence,
-        summary: generated.summary || "Ajustes adicionais preparados para sua solicitacao.",
+        confidence: covered.confidence,
+        summary: covered.summary || "Ajustes adicionais preparados para sua solicitacao.",
         recommendedLevel: 1,
-        siteScript: generated.siteScript,
+        siteScript: covered.siteScript,
         verification: {
           requirePreview: false,
           requireUserApproval: false,

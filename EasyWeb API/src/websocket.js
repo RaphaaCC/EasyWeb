@@ -37,6 +37,10 @@ function isInstallationId(value) {
   return typeof value === "string" && /^[a-z\d-]{16,128}$/i.test(value);
 }
 
+function isAllowedClientOrigin(value) {
+  return value === undefined || /^chrome-extension:\/\/[a-p]{32}$/i.test(value);
+}
+
 function isSnapshotId(value) {
   return typeof value === "string" && /^[a-z\d-]{16,128}$/i.test(value);
 }
@@ -84,7 +88,7 @@ function sendAdaptationStatus(socket, origin, result, extra = {}) {
   });
 }
 
-async function publishBaseAdaptation(socket, adaptationService, origin, snapshotId) {
+async function publishBaseAdaptation(socket, adaptationService, origin, snapshotId, logger) {
   if (!adaptationService) {
     return;
   }
@@ -93,6 +97,11 @@ async function publishBaseAdaptation(socket, adaptationService, origin, snapshot
     const result = await adaptationService.considerSnapshot({ origin });
     sendAdaptationStatus(socket, origin, result, { snapshotId });
   } catch (error) {
+    logger?.warn?.("adaptation.lookup.failed", {
+      origin,
+      snapshotId,
+      code: error?.code || "unknown"
+    });
     send(socket, {
       type: "easyweb:adaptation:error",
       origin,
@@ -117,16 +126,36 @@ function sendPersonalResult(socket, requestId, origin, result) {
     type: "easyweb:adaptation:personal-status",
     requestId,
     origin,
-    state: result?.state || "unavailable"
+    state: result?.state || "unavailable",
+    reason: result?.reason
   });
 }
 
-function sendPersonalFailure(socket, requestId, origin) {
+function describePersonalFailure(error) {
+  switch (error?.code) {
+    case "EASYWEB_GEMINI_UNAVAILABLE":
+      return { state: "model-unavailable", reason: "A API ainda não tem uma chave Gemini configurada." };
+    case "EASYWEB_GEMINI_TIMEOUT":
+    case "EASYWEB_GEMINI_CIRCUIT_OPEN":
+    case "EASYWEB_GEMINI_REQUEST_FAILED":
+    case "EASYWEB_AI_QUEUE_FULL":
+      return { state: "model-temporarily-unavailable", reason: "A IA demorou para responder ou está temporariamente indisponível. Tente novamente em alguns instantes." };
+    case "EASYWEB_GEMINI_INVALID_RESPONSE":
+      return { state: "model-invalid-response", reason: "A IA retornou uma adaptação inválida. Nenhuma alteração foi aplicada." };
+    case "EASYWEB_DATABASE_UNAVAILABLE":
+      return { state: "storage-unavailable", reason: "A API está sem armazenamento disponível para processar este pedido." };
+    default:
+      return { state: "request-failed", reason: "A API não conseguiu processar este pedido. Nenhuma alteração foi aplicada." };
+  }
+}
+
+function sendPersonalFailure(socket, requestId, origin, error) {
+  const failure = describePersonalFailure(error);
   send(socket, {
-    type: "easyweb:adaptation:error",
+    type: "easyweb:adaptation:personal-status",
     requestId,
     origin,
-    reason: "Nao foi possivel processar seu pedido de adaptacao."
+    ...failure
   });
 }
 
@@ -159,7 +188,7 @@ function rememberCompletedPersonalResult(results, requestKey, origin, result) {
   results.set(requestKey, { origin, result, expiresAt: now + PERSONAL_RESULT_TTL_MS });
 }
 
-async function handleMessage(socket, state, snapshotStore, adaptationService, pendingPersonalRequests, completedPersonalResults, raw, isBinary) {
+async function handleMessage(socket, state, snapshotStore, adaptationService, retentionHandler, pendingPersonalRequests, completedPersonalResults, logger, raw, isBinary) {
   const message = parseMessage(raw, isBinary);
   if (!message) {
     socket.close(1008, "Mensagem inválida.");
@@ -171,8 +200,8 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
       socket.close(1008, "Instalação inválida.");
       return;
     }
-
     state.installationId = message.installationId;
+    state.handshaken = true;
     send(socket, {
       type: "easyweb:hello",
       protocolVersion: PROTOCOL_VERSION,
@@ -182,7 +211,7 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
   }
 
   if (message.type === "easyweb:ping") {
-    if (!state.installationId) {
+    if (!state.handshaken) {
       socket.close(1008, "Handshake obrigatorio antes do heartbeat.");
       return;
     }
@@ -191,7 +220,7 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
   }
 
   if (message.type === "easyweb:mapping:snapshot") {
-    if (!state.installationId) {
+    if (!state.handshaken) {
       send(socket, { type: "easyweb:mapping:rejected", reason: "Handshake obrigatório antes do snapshot." });
       return;
     }
@@ -218,10 +247,12 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
       if (!result) {
         throw Object.assign(new Error("Armazenamento indisponível."), { code: "EASYWEB_DATABASE_UNAVAILABLE" });
       }
-      console.info(
-        `[mapping] snapshot recebido: ${result.page.origin}${result.page.path} ` +
-        `(${result.payloadBytes} bytes, template ${result.templateHash.slice(0, 12)})`
-      );
+      logger?.info?.("snapshot.stored", {
+        origin: result.page.origin,
+        path: result.page.path,
+        bytes: result.payloadBytes,
+        template: result.templateHash.slice(0, 12)
+      });
       state.subscribedOrigins.add(result.page.origin);
       send(socket, {
         type: "easyweb:mapping:stored",
@@ -230,15 +261,20 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
         templateHash: result.templateHash,
         payloadBytes: result.payloadBytes
       });
-      void publishBaseAdaptation(socket, adaptationService, result.page.origin, message.snapshotId);
+      void publishBaseAdaptation(socket, adaptationService, result.page.origin, message.snapshotId, logger);
     } catch (error) {
+      logger?.warn?.("snapshot.rejected", {
+        snapshotId: message.snapshotId,
+        code: error?.code || "unknown",
+        retryable: error?.code === "EASYWEB_DATABASE_UNAVAILABLE"
+      });
       respondWithStoreError(socket, error, message.snapshotId);
     }
     return;
   }
 
   if (message.type === "easyweb:adaptation:lookup") {
-    if (!state.installationId || !isOrigin(message.origin)) {
+    if (!state.handshaken || !isOrigin(message.origin)) {
       send(socket, { type: "easyweb:adaptation:error", reason: "Consulta de adaptação inválida." });
       return;
     }
@@ -247,6 +283,10 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
       const result = await adaptationService?.lookup({ origin: message.origin });
       sendAdaptationStatus(socket, message.origin, result);
     } catch (error) {
+      logger?.warn?.("adaptation.lookup.failed", {
+        origin: message.origin,
+        code: error?.code || "unknown"
+      });
       send(socket, {
         type: "easyweb:adaptation:error",
         origin: message.origin,
@@ -257,7 +297,7 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
   }
 
   if (message.type === "easyweb:adaptation:personal-request") {
-    if (!state.installationId || !isSnapshotId(message.requestId) || !isOrigin(message.origin)) {
+    if (!state.handshaken || !isSnapshotId(message.requestId) || !isOrigin(message.origin)) {
       send(socket, { type: "easyweb:adaptation:error", reason: "Solicitação pessoal inválida." });
       return;
     }
@@ -276,7 +316,7 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
       try {
         sendPersonalResult(socket, message.requestId, message.origin, await pendingRequest);
       } catch (error) {
-        sendPersonalFailure(socket, message.requestId, message.origin);
+        sendPersonalFailure(socket, message.requestId, message.origin, error);
       } finally {
         state.pendingPersonalRequestIds.delete(message.requestId);
       }
@@ -293,6 +333,12 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
     }
     state.lastPersonalRequestAt = Date.now();
     state.pendingPersonalRequestIds.add(message.requestId);
+    send(socket, {
+      type: "easyweb:adaptation:personal-status",
+      requestId: message.requestId,
+      origin: message.origin,
+      state: "queued"
+    });
     const personalRequest = Promise.resolve().then(() => adaptationService?.createPersonalPlan({
       installationId: state.installationId,
       origin: message.origin,
@@ -311,7 +357,12 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
       }
       sendPersonalResult(socket, message.requestId, message.origin, result);
     } catch (error) {
-      sendPersonalFailure(socket, message.requestId, message.origin);
+      logger?.warn?.("adaptation.personal.failed", {
+        origin: message.origin,
+        requestId: message.requestId,
+        code: error?.code || "unknown"
+      });
+      sendPersonalFailure(socket, message.requestId, message.origin, error);
     } finally {
       state.pendingPersonalRequestIds.delete(message.requestId);
       if (pendingPersonalRequests.get(requestKey) === personalRequest) {
@@ -321,10 +372,31 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, pe
     return;
   }
 
+  if (message.type === "easyweb:privacy:delete-snapshots") {
+    if (!state.handshaken) {
+      send(socket, { type: "easyweb:privacy:error", reason: "handshake-required" });
+      return;
+    }
+    if (!isSnapshotId(message.requestId)) {
+      send(socket, { type: "easyweb:privacy:error", reason: "invalid-request" });
+      return;
+    }
+    try {
+      const deleted = await snapshotStore?.deleteForInstallation({
+        installationId: state.installationId,
+        retentionHandler
+      });
+      send(socket, { type: "easyweb:privacy:snapshots-deleted", requestId: message.requestId, ...deleted });
+    } catch (error) {
+      send(socket, { type: "easyweb:privacy:error", requestId: message.requestId, reason: "snapshot-deletion-failed" });
+    }
+    return;
+  }
+
   send(socket, { type: "easyweb:error", error: "Mensagem não permitida." });
 }
 
-export function attachWebSocketServer(httpServer, { snapshotStore, adaptationService } = {}) {
+export function attachWebSocketServer(httpServer, { snapshotStore, adaptationService, retentionHandler, logger = {} } = {}) {
   const webSocketServer = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_MESSAGE_BYTES
@@ -335,7 +407,7 @@ export function attachWebSocketServer(httpServer, { snapshotStore, adaptationSer
   const unsubscribeBasePlans = typeof adaptationService?.onBasePlan === "function"
     ? adaptationService.onBasePlan(({ origin, plan }) => {
       for (const [socket, state] of connections) {
-        if (state.subscribedOrigins.has(origin)) {
+        if (state.handshaken && state.subscribedOrigins.has(origin)) {
           send(socket, { type: "easyweb:adaptation:base-plan", origin, plan });
         }
       }
@@ -344,7 +416,7 @@ export function attachWebSocketServer(httpServer, { snapshotStore, adaptationSer
 
   httpServer.on("upgrade", (request, socket, head) => {
     const requestUrl = new URL(request.url, "http://localhost");
-    if (requestUrl.pathname !== "/ws") {
+    if (requestUrl.pathname !== "/ws" || !isAllowedClientOrigin(request.headers.origin)) {
       socket.destroy();
       return;
     }
@@ -357,6 +429,7 @@ export function attachWebSocketServer(httpServer, { snapshotStore, adaptationSer
   webSocketServer.on("connection", (socket) => {
     const state = {
       installationId: null,
+      handshaken: false,
       lastSnapshotAt: 0,
       lastPersonalRequestAt: 0,
       pendingPersonalRequestIds: new Set(),
@@ -364,16 +437,17 @@ export function attachWebSocketServer(httpServer, { snapshotStore, adaptationSer
     };
     connections.set(socket, state);
     const handshakeTimer = setTimeout(() => {
-      if (!state.installationId) {
+      if (!state.handshaken) {
         socket.close(1008, "Handshake obrigatório.");
       }
     }, HANDSHAKE_TIMEOUT_MS);
     socket.on("message", (raw, isBinary) => {
-      handleMessage(socket, state, snapshotStore, adaptationService, pendingPersonalRequests, completedPersonalResults, raw, isBinary).then(() => {
-        if (state.installationId) {
+      handleMessage(socket, state, snapshotStore, adaptationService, retentionHandler, pendingPersonalRequests, completedPersonalResults, logger, raw, isBinary).then(() => {
+        if (state.handshaken) {
           clearTimeout(handshakeTimer);
         }
-      }).catch(() => {
+      }).catch((error) => {
+        logger?.error?.("websocket.message.failed", { code: error?.code || "unknown" });
         socket.close(1011, "Erro ao processar a mensagem.");
       });
     });

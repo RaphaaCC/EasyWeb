@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 
 const DEFAULT_MODEL = "gemini-3.8-flash";
-const PROMPT_VERSION = "easyweb-site-script-v1";
+const PROMPT_VERSION = "easyweb-site-script-v3";
 const SITE_SCRIPT_VERSION = 1;
 const MAX_STEPS = 8;
 const DEFAULT_TIMEOUT_MS = 25_000;
@@ -19,8 +19,26 @@ const ALLOWED_PRESETS = new Set([
   "contrast-support",
   "reduced-motion",
   "large-controls",
-  "content-width"
+  "content-width",
+  "navigation-clarity",
+  "form-legibility",
+  "heading-clarity",
+  "text-color"
 ]);
+const ALLOWED_TEXT_COLORS = Object.freeze({
+  blue: "#005fcc",
+  azul: "#005fcc",
+  red: "#b00020",
+  vermelho: "#b00020",
+  green: "#006b3c",
+  verde: "#006b3c",
+  black: "#000000",
+  preto: "#000000",
+  white: "#ffffff",
+  branco: "#ffffff",
+  purple: "#6a1b9a",
+  roxo: "#6a1b9a"
+});
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -30,16 +48,16 @@ const RESPONSE_SCHEMA = {
     siteScript: {
       type: "object",
       properties: {
-        version: { type: "integer" },
-        triggers: { type: "array", items: { type: "string" } },
+        version: { type: "integer", enum: [SITE_SCRIPT_VERSION] },
+        triggers: { type: "array", items: { type: "string", enum: [...ALLOWED_TRIGGERS] } },
         steps: {
           type: "array",
           items: {
             type: "object",
             properties: {
-              type: { type: "string" },
-              target: { type: "string" },
-              preset: { type: "string" },
+              type: { type: "string", enum: ["apply-style"] },
+              target: { type: "string", enum: [...ALLOWED_SCOPES] },
+              preset: { type: "string", enum: [...ALLOWED_PRESETS] },
               parameters: { type: "object" }
             },
             required: ["type", "target", "preset", "parameters"]
@@ -58,10 +76,12 @@ const SYSTEM_INSTRUCTION = [
   "Nao escreva JavaScript, HTML, CSS livre, URLs, seletores CSS, instrucoes de rede, comandos ou codigo executavel.",
   "siteScript deve ter version 1, triggers e steps. Use document-ready em todos os scripts; inclua route-change somente quando a pagina puder trocar de rota sem recarregar.",
   "Cada step deve ser apenas { type: apply-style, target, preset, parameters }. Os targets permitidos sao main-content, interactive-elements, links, controls e document.",
-  "Os presets permitidos sao readable-text, reading-spacing, focus-ring, link-clarity, control-boundaries, contrast-support, reduced-motion, large-controls e content-width.",
-  "Use no maximo 8 steps. Parametros aceitos: readable-text.scale 0.9-1.35; reading-spacing.lineHeight 1.35-2 e letterSpacing 0-2; focus-ring.width 2-4 e offset 1-5; control-boundaries.width 1-3; large-controls.minimumSize 36-48; content-width.maxWidth 42-90. Os demais presets usam objeto vazio.",
+  "Os presets permitidos sao readable-text, reading-spacing, focus-ring, link-clarity, control-boundaries, contrast-support, reduced-motion, large-controls, content-width, navigation-clarity, form-legibility, heading-clarity e text-color.",
+  "Use no maximo 8 steps. Parametros aceitos: readable-text.scale 0.9-1.35; reading-spacing.lineHeight 1.35-2 e letterSpacing 0-2; focus-ring.width 2-4 e offset 1-5; control-boundaries.width 1-3; large-controls.minimumSize 36-48; content-width.maxWidth 42-90; text-color.color deve ser uma das cores seguras informadas no contrato. Os demais presets usam objeto vazio.",
+  "Quando planScope for personal, userRequest e a prioridade. Ela deve gerar uma alteracao verificavel: reading-difficulty usa readable-text, reading-spacing ou heading-clarity; small-controls usa large-controls em controls; navigation-confusion usa navigation-clarity, focus-ring ou link-clarity; form-difficulty usa form-legibility; low-contrast usa contrast-support, link-clarity ou control-boundaries; text-color usa text-color em document.",
+  "large-controls aumenta o tamanho visual e a area de acionamento de botoes, campos e controles compativeis. Use minimumSize 48 quando o usuario pedir botoes ou controles maiores.",
   "Nunca remova conteudo, altere formularios, clique em acoes, mude URLs, acesse dados do usuario ou desative controles.",
-  "Sem evidencia de melhoria segura, devolva steps vazios e explique em summary."
+  "Para planos base, sem evidencia de melhoria segura, devolva steps vazios e explique em summary. Para planos pessoais, devolva steps vazios somente se o pedido nao puder ser atendido com seguranca."
 ].join("\n");
 
 function clamp(value, minimum, maximum, fallback = minimum) {
@@ -121,6 +141,11 @@ function normalizeParameters(preset, source) {
       return { minimumSize: clamp(parameters.minimumSize, 36, 48, 40) };
     case "content-width":
       return { maxWidth: clamp(parameters.maxWidth, 42, 90, 68) };
+    case "text-color": {
+      const requested = String(parameters.color || "").trim().toLowerCase();
+      const allowedHex = Object.values(ALLOWED_TEXT_COLORS);
+      return { color: ALLOWED_TEXT_COLORS[requested] || (allowedHex.includes(requested) ? requested : "#005fcc") };
+    }
     default:
       return {};
   }
@@ -215,11 +240,20 @@ function createPrompt({ origin, snapshots, planScope, profile, basePlan, previou
       stepType: "apply-style",
       targets: [...ALLOWED_SCOPES],
       presets: [...ALLOWED_PRESETS],
+      textColors: [...new Set(Object.values(ALLOWED_TEXT_COLORS))],
       maxSteps: MAX_STEPS
     },
     basePlan: basePlan || null,
     previousPersonalPlan: previousPersonalPlan || null,
     userRequest: userRequest || null,
+    personalRequestRequirements: planScope === "personal" ? {
+      "reading-difficulty": ["readable-text", "reading-spacing", "content-width", "heading-clarity"],
+      "navigation-confusion": ["navigation-clarity", "focus-ring", "link-clarity", "control-boundaries"],
+      "small-controls": ["large-controls"],
+      "form-difficulty": ["form-legibility"],
+      "low-contrast": ["contrast-support", "link-clarity", "control-boundaries"],
+      "text-color": ["text-color"]
+    } : null,
     snapshots
   });
 }

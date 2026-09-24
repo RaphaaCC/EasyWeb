@@ -48,7 +48,7 @@ export function createApp({ database, gemini, adminToken = process.env.EASYWEB_A
     response.status(200).json({
       status: "ok",
       service: "easyweb-api",
-      version: "0.1.0-development",
+      version: "v1.0.0 Beta",
       timestamp: new Date().toISOString()
     });
   });

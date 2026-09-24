@@ -28,19 +28,27 @@ npm run db:sync
 npm run db:migrate
 ```
 
-As tabelas sincronizadas são `easyweb_site_snapshots`, `easyweb_adaptation_families` e `easyweb_adaptation_base_plans`. Os payloads são sanitizados, convertidos para JSON e comprimidos com `gzip` em um `LONGBLOB`. A sincronização não apaga registros existentes.
+As tabelas sincronizadas incluem `easyweb_site_snapshots`, `easyweb_adaptation_families`, `easyweb_adaptation_base_plans` e `easyweb_adaptation_jobs`. Os payloads são sanitizados, convertidos para JSON e comprimidos com `gzip` em um `LONGBLOB`. A sincronização preserva snapshots, planos e filas existentes; na versão 5, ela remove apenas a tabela legada `easyweb_installations`, que armazenava o recurso de matrícula descontinuado.
+
+## Identidade local e retenção
+
+A extensão gera um identificador local aleatório para separar snapshots e pedidos pessoais. Não existe matrícula, segredo de instalação ou conta de usuário nesse protocolo. O identificador não contém dados pessoais e não é usado como autenticação.
+
+`SNAPSHOT_RETENTION_DAYS` define por quantos dias a API mantém snapshots sem nova observação; o padrão é 30. A limpeza roda na inicialização e diariamente, em lotes definidos por `SNAPSHOT_RETENTION_BATCH_SIZE`. Quando uma exclusão deixa uma família sem snapshots-fonte, os jobs e planos derivados também são removidos. A página de configurações permite apagar os snapshots associados ao identificador local desta extensão.
 
 ## IA com Gemini
 
 Para habilitar a análise de IA, defina `GEMINI_API_KEY` com uma chave do Google AI Studio. O modelo padrão é `gemini-3.8-flash`; altere-o com `GEMINI_MODEL`. Sem a chave, os snapshots continuam podendo ser armazenados, mas a análise fica indisponível e nenhum provedor externo é chamado.
 
-O modelo recebe snapshots sanitizados e compatíveis da mesma origem para criar um plano base compartilhado. Um pedido pessoal pode usar o snapshot protegido atual, o perfil e o catálogo fechado de ações. Antes de persistir uma resposta, a API remove ações, escopos e parâmetros que não pertencem ao catálogo.
+O modelo recebe snapshots sanitizados e compatíveis da mesma origem para criar um plano base compartilhado. Um pedido pessoal pode usar o snapshot protegido atual, o perfil e o catálogo fechado de ações. O catálogo inclui legibilidade de texto, títulos, navegação, formulários, foco, links, contraste, movimento, controles maiores e cores de texto de uma paleta segura. Antes de persistir uma resposta, a API remove ações, escopos e parâmetros que não pertencem ao catálogo.
 
 Cada chamada tem timeout, retentativas para `408`, `429` e erros `5xx`, além de um circuit breaker. Após três falhas transitórias consecutivas, novas chamadas ficam suspensas por 60 segundos por padrão. Ajuste esses valores com `GEMINI_TIMEOUT_MS`, `GEMINI_RETRY_ATTEMPTS`, `GEMINI_CIRCUIT_FAILURE_THRESHOLD` e `GEMINI_CIRCUIT_COOLDOWN_MS`.
 
+Todas as chamadas ao Gemini passam por uma fila serial e limitada em memória. Pedidos pessoais enviados pelo popup têm prioridade sobre análises base pendentes; uma chamada que já começou termina antes da próxima iniciar. Os logs `ai.request.queued`, `ai.request.started`, `ai.request.completed`, `ai.request.failed` e `ai.request.rejected` mostram tipo, origem, duração e, para pedidos pessoais, o texto já sanitizado e truncado.
+
 ## Fila de planos base
 
-Planos base compartilhados são criados pela fila persistente `easyweb_adaptation_jobs`. O WebSocket confirma primeiro o snapshot; depois, o worker reivindica um job por vez, gera o plano e registra tentativas, atraso da nova tentativa e falha final.
+Planos base compartilhados são criados pela fila persistente `easyweb_adaptation_jobs`. O WebSocket confirma primeiro o snapshot; depois, o worker reivindica um job por vez, envia a geração pela fila serial do Gemini e registra tentativas, atraso da nova tentativa e falha final.
 
 Uma família só entra na fila quando as capturas são estruturalmente compatíveis, possuem evidência independente e atingem o escore mínimo de confiança. Páginas estáticas precisam de duas amostras compatíveis; famílias com sinais de dinamismo precisam de pelo menos três. A evidência pode vir de instalações diferentes, rotas diferentes ou observação de uma mesma instalação por ao menos dez minutos.
 
@@ -74,14 +82,15 @@ O endpoint local é `ws://127.0.0.1:3001/ws`. Em produção, publique-o como `ws
 
 Mensagens principais:
 
-- `easyweb:hello`, com `protocolVersion: 1`, identifica a extensão;
+- `easyweb:hello`, com `protocolVersion: 1` e um `installationId` local aleatório, conclui o handshake da extensão;
 - `easyweb:ping` recebe `easyweb:pong` para manter a conexão ativa;
 - `easyweb:mapping:snapshot` envia um snapshot estrutural autorizado após o handshake;
 - `easyweb:mapping:stored` e `easyweb:mapping:rejected` confirmam o mesmo `snapshotId`;
 - `easyweb:adaptation:status` e `easyweb:adaptation:base-plan` acompanham a comparação de famílias e entregam um plano base validado;
 - `easyweb:adaptation:personal-request` e `easyweb:adaptation:personal-plan` tratam ajustes solicitados no popup e entregues apenas ao socket solicitante.
+- `easyweb:privacy:delete-snapshots` remove os snapshots associados ao identificador local da conexão e devolve apenas as contagens removidas.
 
-O servidor rejeita snapshots maiores que 512 KB, caminhos com parâmetros ou fragmentos, identificadores inválidos e envios repetidos em menos de três segundos. Pedidos pessoais no mesmo socket têm intervalo mínimo de 15 segundos.
+O servidor rejeita conexões iniciadas por páginas Web, snapshots maiores que 512 KB, caminhos com parâmetros ou fragmentos, identificadores inválidos e envios repetidos em menos de três segundos. Pedidos pessoais no mesmo socket têm intervalo mínimo de 15 segundos. Clientes de serviço sem cabeçalho `Origin` continuam aceitos para testes e integrações locais.
 
 Antes de gravar, a API reduz o HTML à topologia de tags e remove texto, atributos, scripts e elementos incorporados. No CSS, remove imports, fontes remotas, URLs externas e construções executáveis. Cookies, textos, atributos identificáveis, URLs completas de assets e código JavaScript não entram no banco. O payload nunca é escrito no log.
 
@@ -91,6 +100,8 @@ Antes de gravar, a API reduz o HTML à topologia de tags e remove texto, atribut
 - Cabeçalhos de segurança fornecidos pelo Helmet.
 - CORS configurável por `CORS_ORIGIN`.
 - Snapshots estruturais autorizados são persistidos como JSON comprimido no MySQL quando o banco está configurado.
+- Não existe matrícula nem segredo de instalação no protocolo.
+- Snapshots expiram automaticamente e podem ser removidos sob demanda pela extensão que mantém o identificador local correspondente.
 - Nenhum conteúdo enviado pelo cliente é executado.
 
 ## Testes

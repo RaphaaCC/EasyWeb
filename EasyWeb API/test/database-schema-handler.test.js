@@ -67,13 +67,16 @@ function rowsForIndexes(indexes = TABLE_INDEXES) {
   ));
 }
 
-function createDatabase({ columns = TABLE_COLUMNS, indexes = TABLE_INDEXES } = {}) {
+function createDatabase({ columns = TABLE_COLUMNS, indexes = TABLE_INDEXES, obsoleteTables = [] } = {}) {
   const statements = [];
   return {
     configured: true,
     statements,
     query: async (statement, values) => {
       statements.push({ statement, values });
+      if (/information_schema\.TABLES/.test(statement)) {
+        return { rows: obsoleteTables.map((tableName) => ({ tableName })) };
+      }
       if (/information_schema\.COLUMNS/.test(statement)) return { rows: rowsForColumns(columns) };
       if (/information_schema\.STATISTICS/.test(statement)) return { rows: rowsForIndexes(indexes) };
       return { rows: [] };
@@ -86,10 +89,19 @@ test("não tenta sincronizar MySQL quando ele não foi configurado", async () =>
   assert.deepEqual(result, {
     synchronized: false,
     reason: "not-configured",
-    schemaVersion: 3,
+    schemaVersion: 5,
     tables: [],
     changes: []
   });
+});
+
+test("remove somente a tabela legada de matrícula", async () => {
+  const database = createDatabase({ obsoleteTables: ["easyweb_installations"] });
+  const result = await synchronizeDatabaseSchema(database);
+
+  assert.ok(result.changes.some((change) =>
+    change.operation === "drop-obsolete-table" && change.table === "easyweb_installations"));
+  assert.ok(database.statements.some(({ statement }) => statement === "DROP TABLE `easyweb_installations`"));
 });
 
 test("verifica o schema canônico completo a cada sincronização", async () => {
@@ -98,7 +110,7 @@ test("verifica o schema canônico completo a cada sincronização", async () => 
 
   assert.deepEqual(result, {
     synchronized: true,
-    schemaVersion: 3,
+    schemaVersion: 5,
     tables: [
       "easyweb_site_snapshots",
       "easyweb_adaptation_families",

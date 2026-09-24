@@ -1,6 +1,6 @@
 (() => {
   const MAPPING_CAPTURE_POLICY = Object.freeze({
-    version: 3,
+    version: 4,
     allowedData: Object.freeze([
       "sanitized-structural-html",
       "sanitized-accessible-css",
@@ -53,6 +53,28 @@
     "form[action*=payment i]"
   ].join(", ");
   const SENSITIVE_ELEMENT_SELECTOR = `${SENSITIVE_INPUT_SELECTOR}, ${SENSITIVE_FORM_SELECTOR}`;
+
+  function sanitizePath(pathname) {
+    if (typeof pathname !== "string" || !pathname.startsWith("/")) {
+      return "/";
+    }
+    const segments = pathname.split("/").map((segment) => {
+      if (!segment || segment === ":id" || segment === ":private") return segment;
+      let decoded = segment;
+      try {
+        decoded = decodeURIComponent(segment);
+      } catch (error) {
+        // Segmentos malformados permanecem codificados e são tratados pelas regras abaixo.
+      }
+      if (/^\d{4,}$/.test(decoded)) return ":id";
+      if (/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(decoded)) return ":id";
+      if (decoded.includes("@") || /^[a-f\d]{16,}$/i.test(decoded) || /^[a-z\d_-]{24,}$/i.test(decoded)) {
+        return ":private";
+      }
+      return segment.slice(0, 120);
+    });
+    return segments.join("/").slice(0, 2048) || "/";
+  }
 
   function hasSensitiveForm(documentLike) {
     return Boolean(documentLike.querySelector(SENSITIVE_ELEMENT_SELECTOR));
@@ -253,7 +275,7 @@
       captureVersion: 1,
       page: {
         origin: locationLike.origin,
-        path: locationLike.pathname
+        path: sanitizePath(locationLike.pathname)
       },
       structure: {
         nodeCount: state.nodeCount,
@@ -267,5 +289,5 @@
     };
   }
 
-  globalThis.EasyWebMappingSecurityHandler = { MAPPING_CAPTURE_POLICY, assess, createSnapshot };
+  globalThis.EasyWebMappingSecurityHandler = { MAPPING_CAPTURE_POLICY, assess, createSnapshot, sanitizePath };
 })();

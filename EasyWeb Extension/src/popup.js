@@ -276,7 +276,7 @@ function renderAiAdaptation(preferences, adaptation = {}, planState, apiConnecti
   const status = document.querySelector("#ai-adaptation-status");
   const description = document.querySelector("#ai-adaptation-description");
   const state = adaptation.state || "disabled";
-  const personalRequestPending = state === "queued" || state === "analyzing-personal";
+  const personalRequestPending = state === "queued" || state === "analyzing-personal" || state === "processing";
   const labels = {
     "awaiting-second-snapshot": "Aguardando snapshots: a API precisa de mais uma estrutura compatível deste site.",
     "awaiting-compatible-snapshot": "Aguardando snapshots: a API está identificando uma família de páginas compatível.",
@@ -284,12 +284,18 @@ function renderAiAdaptation(preferences, adaptation = {}, planState, apiConnecti
     "awaiting-family-confidence": "Aguardando evidências: a API ainda está confirmando a estabilidade desta família de páginas.",
     "family-stable-no-opportunity": "Família estável: a API não identificou uma melhoria automática segura neste momento.",
     "analyzing-base": "Analisando: a IA está preparando os ajustes comuns deste site.",
+    queued: "Na fila: seu pedido pessoal está aguardando processamento.",
     "analyzing-personal": "Analisando: a IA está preparando seu ajuste pessoal.",
+    processing: "Analisando: a IA está preparando seu ajuste pessoal.",
     "checking-adaptation": "Consultando: verificando uma adaptação já preparada para este site.",
     "rate-limited": "Falhou: aguarde alguns segundos antes de solicitar outro ajuste pessoal.",
     "model-unavailable": "Falhou: a API ainda não tem uma chave Gemini configurada.",
     "model-temporarily-unavailable": "Falhou: a IA está temporariamente indisponível. Tente novamente em alguns instantes.",
+    "model-invalid-response": "Falhou: a IA retornou uma adaptação inválida. Nenhuma alteração foi aplicada.",
     "storage-unavailable": "Falhou: a API está sem armazenamento para analisar este site.",
+    "request-failed": "Falhou: a API não conseguiu processar este pedido.",
+    unavailable: "Falhou: a adaptação pessoal não está disponível neste momento.",
+    error: "Falhou: não foi possível concluir este pedido de IA.",
     "awaiting-plan": "Aguardando snapshots: ainda não há um plano compatível para este site.",
     "automatic-disabled": "Adaptação disponível sob pedido: as adaptações automáticas estão desativadas neste site.",
     active: "Adaptação disponível e aplicada nesta aba.",
@@ -315,7 +321,7 @@ function renderAiAdaptation(preferences, adaptation = {}, planState, apiConnecti
   } else {
     description.textContent = "A extensão aplica somente CSS compilado a partir de planos de IA validados.";
   }
-  status.textContent = labels[state] || adaptation.message || labels.disabled;
+  status.textContent = adaptation.message || labels[state] || labels.disabled;
 
   const previous = lastAiPlanState?.previous;
   const currentPlan = lastAiPlanState?.personalPlan || lastAiPlanState?.basePlan;
@@ -347,8 +353,10 @@ function getPersonalIntentTags(text) {
   const tags = [];
   if (/ler|texto|leitura/.test(normalized)) tags.push("reading-difficulty");
   if (/navega|menu|confus/.test(normalized)) tags.push("navigation-confusion");
-  if (/pequen|bot[aã]o|controle|clic/.test(normalized)) tags.push("small-controls");
-  if (/contraste|cor|escuro|claro/.test(normalized)) tags.push("low-contrast");
+  if (/pequen|bot(?:[aã]o|ões|oes)|controle|clic/.test(normalized)) tags.push("small-controls");
+  if (/\bformul[aá]rio\b|\bcampo(?:s)?\b|\bpreench|\bcadastro\b|\bdigitar\b/.test(normalized)) tags.push("form-difficulty");
+  if (/\bcontraste\b|\bcor(?:es)?\b|\bescuro\b|\bclaro\b/.test(normalized)) tags.push("low-contrast");
+  if (/(?:texto|letra|fonte).{0,40}(?:azul|blue|vermelh|red|verde|green|pret|black|branc|white|rox|purple)|(?:azul|blue|vermelh|red|verde|green|pret|black|branc|white|rox|purple).{0,40}(?:texto|letra|fonte)/.test(normalized)) tags.push("text-color");
   return tags;
 }
 

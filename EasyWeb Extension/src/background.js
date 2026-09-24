@@ -1,16 +1,33 @@
-importScripts("handlers/settings-handler.js", "handlers/content-injection-handler.js");
+importScripts("handlers/settings-handler.js", "handlers/content-injection-handler.js", "handlers/mapping-security-handler.js");
 
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const MAX_MAPPING_SNAPSHOT_BYTES = 512 * 1024;
 const MAX_QUEUED_SNAPSHOTS = 20;
+const MAX_QUEUED_PERSONAL_REQUESTS = 20;
+const MAX_TRACKED_ORIGINS = 100;
 const MIN_MAPPING_SEND_INTERVAL_MS = 3_000;
 const MIN_ADAPTATION_LOOKUP_INTERVAL_MS = 20_000;
 const MIN_PERSONAL_SEND_INTERVAL_MS = 15_250;
+const PERSONAL_RESULT_TIMEOUT_MS = 45_000;
 const SNAPSHOT_ACK_TIMEOUT_MS = 15_000;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
+const HEARTBEAT_TIMEOUT_MS = 45_000;
 const CONFIRMED_TEMPLATE_REFRESH_MS = 10 * 60_000;
 const INSTALLATION_ID_KEY = "easyweb:installation-id";
+const PERSONAL_PENDING_STATES = new Set(["queued", "analyzing-personal", "processing"]);
+const PERSONAL_STATUS_MESSAGES = Object.freeze({
+  "base-plan-unavailable": "O plano base não está mais disponível para este site.",
+  "invalid-personal-request": "Não foi possível usar este pedido de adaptação.",
+  "model-unavailable": "A API ainda não tem uma chave Gemini configurada.",
+  "model-temporarily-unavailable": "A IA demorou para responder ou está temporariamente indisponível. Tente novamente em alguns instantes.",
+  "model-invalid-response": "A IA retornou uma adaptação inválida. Nenhuma alteração foi aplicada.",
+  "storage-unavailable": "A API está sem armazenamento disponível para processar este pedido.",
+  "rate-limited": "Aguarde alguns segundos antes de solicitar outro ajuste pessoal.",
+  "no-compatible-adjustment": "A IA não encontrou um ajuste seguro e perceptível para este pedido.",
+  "request-failed": "A API não conseguiu processar este pedido. Nenhuma alteração foi aplicada.",
+  unavailable: "A adaptação pessoal não está disponível neste momento."
+});
 
 let apiSocket;
 let heartbeatTimer;
@@ -22,6 +39,8 @@ let nextMappingSendAt = 0;
 let nextPersonalSendAt = 0;
 let reconnectAttempt = 0;
 let apiEnabled = true;
+let lastPongAt = 0;
+const privacyRequests = new Map();
 const mappingSnapshotQueue = new Map();
 const adaptationLookupQueue = new Map();
 const personalAdaptationQueue = new Map();
@@ -82,12 +101,12 @@ function closeApiSocket(reason = "EasyWeb desativado.") {
 
 async function getInstallationId() {
   const saved = await chrome.storage.local.get(INSTALLATION_ID_KEY);
-  if (typeof saved[INSTALLATION_ID_KEY] === "string" && /^[a-f\d-]{16,128}$/i.test(saved[INSTALLATION_ID_KEY])) {
-    return saved[INSTALLATION_ID_KEY];
+  const installationId = typeof saved[INSTALLATION_ID_KEY] === "string" && /^[a-f\d-]{16,128}$/i.test(saved[INSTALLATION_ID_KEY])
+    ? saved[INSTALLATION_ID_KEY]
+    : crypto.randomUUID();
+  if (installationId !== saved[INSTALLATION_ID_KEY]) {
+    await chrome.storage.local.set({ [INSTALLATION_ID_KEY]: installationId });
   }
-
-  const installationId = crypto.randomUUID();
-  await chrome.storage.local.set({ [INSTALLATION_ID_KEY]: installationId });
   return installationId;
 }
 
@@ -121,6 +140,12 @@ function startHeartbeat(socket) {
       return;
     }
 
+    if (lastPongAt > 0 && Date.now() - lastPongAt > HEARTBEAT_TIMEOUT_MS) {
+      setConnectionStatus("disconnected", connectionStatus.url, "A API parou de responder; nova tentativa agendada.");
+      socket.close(1011, "Heartbeat expirado.");
+      return;
+    }
+
     try {
       socket.send(JSON.stringify({ type: "easyweb:ping" }));
     } catch (error) {
@@ -140,7 +165,8 @@ function isSnapshotFromSender(snapshot, sender) {
 
   try {
     const senderUrl = new URL(sender.url);
-    return senderUrl.origin === snapshot.page.origin && senderUrl.pathname === snapshot.page.path;
+    return senderUrl.origin === snapshot.page.origin &&
+      EasyWebMappingSecurityHandler.sanitizePath(senderUrl.pathname) === snapshot.page.path;
   } catch (error) {
     return false;
   }
@@ -207,15 +233,27 @@ function schedulePersonalAdaptationFlush(socket, delay = MIN_PERSONAL_SEND_INTER
   }, Math.max(0, delay));
 }
 
+function rememberRecentTab(origin, tabId) {
+  if (!origin || !tabId) return;
+  recentMappingTabs.delete(origin);
+  recentMappingTabs.set(origin, tabId);
+  while (recentMappingTabs.size > MAX_TRACKED_ORIGINS) {
+    recentMappingTabs.delete(recentMappingTabs.keys().next().value);
+  }
+}
+
 function queueAdaptationLookup(origin, tabId) {
   if (tabId) {
-    recentMappingTabs.set(origin, tabId);
+    rememberRecentTab(origin, tabId);
   }
   const item = adaptationLookupQueue.get(origin) || { origin, tabId, lastSentAt: 0 };
   if (tabId) {
     item.tabId = tabId;
   }
   adaptationLookupQueue.set(origin, item);
+  while (adaptationLookupQueue.size > MAX_TRACKED_ORIGINS) {
+    adaptationLookupQueue.delete(adaptationLookupQueue.keys().next().value);
+  }
   if (hasConfirmedApiConnection()) {
     flushAdaptationLookups(apiSocket);
   } else {
@@ -320,7 +358,7 @@ async function queueMappingSnapshot(snapshot, sender, force = false, captureId) 
     existing.tabId = sender.tab.id;
     existing.pendingSnapshot = snapshot;
     existing.pendingCaptureId = normalizedCaptureId;
-    recentMappingTabs.set(snapshot.page.origin, sender.tab.id);
+    rememberRecentTab(snapshot.page.origin, sender.tab.id);
     return {
       accepted: true,
       state: "sending",
@@ -340,7 +378,7 @@ async function queueMappingSnapshot(snapshot, sender, force = false, captureId) 
   item.captureId = normalizedCaptureId;
   item.envelope.snapshot = snapshot;
   mappingSnapshotQueue.set(key, item);
-  recentMappingTabs.set(snapshot.page.origin, sender.tab.id);
+  rememberRecentTab(snapshot.page.origin, sender.tab.id);
   while (mappingSnapshotQueue.size > MAX_QUEUED_SNAPSHOTS) {
     const discardedKey = mappingSnapshotQueue.keys().next().value;
     const discarded = mappingSnapshotQueue.get(discardedKey);
@@ -414,7 +452,23 @@ async function queuePersonalAdaptationRequest(payload, sender) {
     lastSentAt: 0,
     sent: false
   });
-  recentMappingTabs.set(payload.snapshot.page.origin, sender.tab.id);
+  rememberRecentTab(payload.snapshot.page.origin, sender.tab.id);
+  while (personalAdaptationQueue.size > MAX_QUEUED_PERSONAL_REQUESTS) {
+    const discardedId = personalAdaptationQueue.keys().next().value;
+    const discarded = personalAdaptationQueue.get(discardedId);
+    personalAdaptationQueue.delete(discardedId);
+    if (discarded) {
+      void deliverToTab(discarded.tabId, {
+        type: "easyweb:ai-adaptation-status",
+        status: {
+          state: "request-failed",
+          scope: "personal",
+          requestId: discarded.requestId,
+          message: "A fila local de pedidos atingiu o limite. Envie o ajuste novamente mais tarde."
+        }
+      });
+    }
+  }
   if (hasConfirmedApiConnection()) {
     flushPersonalAdaptationRequests(apiSocket);
     return { accepted: true, state: "queued" };
@@ -485,23 +539,32 @@ function flushPersonalAdaptationRequests(socket) {
     return;
   }
 
-  const item = [...personalAdaptationQueue.values()].find((candidate) => !candidate.sent);
+  const item = [...personalAdaptationQueue.values()].find((candidate) =>
+    !candidate.sent || now - candidate.lastSentAt >= PERSONAL_RESULT_TIMEOUT_MS
+  );
   if (!item) {
     return;
   }
 
   try {
-      socket.send(JSON.stringify(item.envelope));
-      item.lastSentAt = now;
-      item.sent = true;
-      nextPersonalSendAt = now + MIN_PERSONAL_SEND_INTERVAL_MS;
-      deliverToTab(item.tabId, {
+    const retrying = item.sent;
+    socket.send(JSON.stringify(item.envelope));
+    item.lastSentAt = now;
+    item.sent = true;
+    nextPersonalSendAt = now + MIN_PERSONAL_SEND_INTERVAL_MS;
+    deliverToTab(item.tabId, {
         type: "easyweb:ai-adaptation-status",
-        status: { state: "analyzing-personal", message: "A IA está preparando seus ajustes adicionais." }
+        status: {
+          state: retrying ? "queued" : "analyzing-personal",
+          scope: "personal",
+          requestId: item.requestId,
+          message: retrying
+            ? "Ainda aguardando a resposta da IA; a solicitação foi reenviada com segurança."
+            : "A IA está preparando seus ajustes adicionais."
+        }
       }).catch(() => {});
-      if ([...personalAdaptationQueue.values()].some((candidate) => !candidate.sent)) {
-        schedulePersonalAdaptationFlush(socket);
-      }
+    const hasUnsent = [...personalAdaptationQueue.values()].some((candidate) => !candidate.sent);
+    schedulePersonalAdaptationFlush(socket, hasUnsent ? MIN_PERSONAL_SEND_INTERVAL_MS : PERSONAL_RESULT_TIMEOUT_MS);
   } catch (error) {
     schedulePersonalAdaptationFlush(socket);
   }
@@ -622,35 +685,59 @@ async function handleAdaptationDelivery(message) {
 
   if (message.type === "easyweb:adaptation:personal-plan" && message.plan) {
     const item = personalAdaptationQueue.get(message.requestId);
-    personalAdaptationQueue.delete(message.requestId);
+    if (!item) {
+      // Planos pessoais são associados a uma solicitação local. Não os
+      // entregamos para uma aba arbitrária após uma resposta atrasada.
+      return;
+    }
+    const profileId = item?.profileId || (typeof message.plan.profile === "string" ? message.plan.profile : "default");
+    const siteSettings = EasyWebSettingsHandler.create({
+      origin: message.origin,
+      href: `${message.origin}/`
+    });
+    try {
+      // Persist first: storage events give the target tab a second, reliable
+      // application path if it is replaced while the direct message is sent.
+      await siteSettings.saveAiPersonalPlan(message.plan, profileId);
+    } catch (error) {
+      // The direct delivery below still applies the valid plan in the open tab.
+    }
     await deliverToTab(item?.tabId || preferredTabId, {
       type: "easyweb:apply-ai-personal-plan",
       plan: message.plan,
-      profileId: item?.profileId,
+      profileId,
       requestId: message.requestId
     }).catch(() => {});
+    personalAdaptationQueue.delete(message.requestId);
     return;
   }
 
   if (message.type === "easyweb:adaptation:personal-status" || message.type === "easyweb:adaptation:error") {
-    const item = message.requestId ? personalAdaptationQueue.get(message.requestId) : null;
-    if (message.requestId) {
+    const item = message.requestId ? personalAdaptationQueue.get(message.requestId) : undefined;
+    if (!item) {
+      // Erros de consultas automáticas não podem substituir o estado de um
+      // pedido pessoal que esteja em andamento no popup.
+      if (message.type === "easyweb:adaptation:error" && message.origin) {
+        adaptationLookupQueue.delete(message.origin);
+      }
+      return;
+    }
+    const pendingStatus = message.type === "easyweb:adaptation:personal-status" &&
+      PERSONAL_PENDING_STATES.has(message.state);
+    if (!pendingStatus) {
       personalAdaptationQueue.delete(message.requestId);
     }
     if (message.type === "easyweb:adaptation:error" && message.origin) {
       // Clear failed lookups so a recovered API can be queried immediately.
       adaptationLookupQueue.delete(message.origin);
     }
-    await deliverToTab(item?.tabId || preferredTabId, {
+    await deliverToTab(item.tabId, {
       type: "easyweb:ai-adaptation-status",
       status: {
         state: message.state || "error",
-        message: message.reason || {
-          "base-plan-unavailable": "O plano base não está mais disponível para este site.",
-          "invalid-personal-request": "Não foi possível usar este pedido de adaptação.",
-          "model-unavailable": "A API ainda não tem uma chave Gemini configurada.",
-          "rate-limited": "Aguarde alguns segundos antes de solicitar outro ajuste pessoal."
-        }[message.state] || "Não foi possível concluir a análise de IA agora."
+        scope: "personal",
+        requestId: message.requestId,
+        message: message.reason || PERSONAL_STATUS_MESSAGES[message.state] || PERSONAL_STATUS_MESSAGES[message.state || "unavailable"]
       }
     }).catch(() => {});
     return;
@@ -666,6 +753,7 @@ async function handleAdaptationDelivery(message) {
       type: "easyweb:ai-adaptation-status",
       status: {
         state: message.state,
+        scope: "base",
         similarity: message.similarity,
         trust: message.trust,
         confidence: message.confidence,
@@ -683,6 +771,7 @@ async function handleAdaptationDelivery(message) {
 
 async function connectToApi() {
   clearConnectionTimers();
+  lastPongAt = 0;
   const saved = await chrome.storage.local.get([
     EasyWebSettingsHandler.DEVELOPER_MODE_KEY,
     EasyWebSettingsHandler.API_BASE_URL_KEY,
@@ -781,14 +870,25 @@ async function connectToApi() {
         }
         clearTimeout(handshakeTimer);
         handshakeTimer = undefined;
+        lastPongAt = Date.now();
         setConnectionStatus("connected", socketUrl, `Conectado a ${socketUrl}`);
         startHeartbeat(socket);
         flushMappingSnapshots(socket);
         flushAdaptationLookups(socket);
         flushPersonalAdaptationRequests(socket);
       } else if (message?.type === "easyweb:pong") {
+        lastPongAt = Date.now();
         if (connectionStatus.state !== "handshaking") {
           setConnectionStatus("connected", socketUrl, `Conectado a ${socketUrl}`);
+        }
+      } else if (message?.type === "easyweb:privacy:snapshots-deleted" || message?.type === "easyweb:privacy:error") {
+        const pending = privacyRequests.get(message.requestId);
+        if (pending) {
+          privacyRequests.delete(message.requestId);
+          clearTimeout(pending.timer);
+          pending.resolve(message.type === "easyweb:privacy:snapshots-deleted"
+            ? { deleted: true, ...message }
+            : { deleted: false, reason: "A API não conseguiu remover os snapshots." });
         }
       } else if (message?.type === "easyweb:mapping:stored" || message?.type === "easyweb:mapping:rejected") {
         handleMappingDelivery(message).catch(() => {
@@ -815,7 +915,12 @@ async function connectToApi() {
       return;
     }
 
+    lastPongAt = 0;
     if (!apiEnabled) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
+      clearTimeout(handshakeTimer);
+      handshakeTimer = undefined;
       return;
     }
 
@@ -865,6 +970,27 @@ async function refreshAllTabs() {
   await Promise.all(tabs.filter((tab) => tab.id).map((tab) => refreshTab(tab.id)));
 }
 
+async function deleteRemoteSnapshots() {
+  if (!hasConfirmedApiConnection()) {
+    return { deleted: false, reason: "A API precisa estar conectada para remover os snapshots remotos." };
+  }
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      privacyRequests.delete(requestId);
+      resolve({ deleted: false, reason: "A API não respondeu à remoção dos snapshots." });
+    }, 15_000);
+    privacyRequests.set(requestId, { resolve, timer });
+    try {
+      apiSocket.send(JSON.stringify({ type: "easyweb:privacy:delete-snapshots", requestId }));
+    } catch (error) {
+      clearTimeout(timer);
+      privacyRequests.delete(requestId);
+      resolve({ deleted: false, reason: "Não foi possível enviar a solicitação de remoção." });
+    }
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "easyweb:get-api-connection-status") {
     sendResponse({ ...connectionStatus });
@@ -889,6 +1015,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     queuePersonalAdaptationRequest(message, sender)
       .then(sendResponse)
       .catch(() => sendResponse({ accepted: false, reason: "Não foi possível preparar sua solicitação." }));
+    return true;
+  }
+
+  if (message?.type === "easyweb:privacy:delete-snapshots") {
+    deleteRemoteSnapshots().then(sendResponse).catch(() => {
+      sendResponse({ deleted: false, reason: "Não foi possível remover os snapshots." });
+    });
     return true;
   }
 });

@@ -356,6 +356,34 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.secondary-action {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #17897b;
+  border-radius: 6px;
+  background: #fff;
+  color: #176e64;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.secondary-action:hover:not(:disabled),
+.secondary-action:focus-visible {
+  border-color: #078b7e;
+  background: #eef8f5;
+  outline: 2px solid rgb(22 173 157 / 25%);
+  outline-offset: 2px;
+}
+
+.secondary-action:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .api-connection-status {
   grid-column: 1 / -1;
   margin: -10px 0 0 !important;

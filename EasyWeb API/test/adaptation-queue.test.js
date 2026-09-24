@@ -107,6 +107,10 @@ test("persiste, executa e publica um plano base confiavel", async () => {
   assert.ok(statements.some(({ statement }) => statement.includes("sample_count") && statement.includes("confidence_score")));
   assert.ok(statements.some(({ statement }) => /INSERT INTO easyweb_adaptation_jobs/.test(statement)));
   assert.ok(statements.some(({ statement }) => /UPDATE easyweb_adaptation_jobs/.test(statement)));
+  const planInsertIndex = statements.findIndex(({ statement }) => /INSERT INTO easyweb_adaptation_base_plans/.test(statement));
+  const familyReadyIndex = statements.findIndex(({ statement }) => /SET status = 'ready'/.test(statement));
+  assert.ok(planInsertIndex >= 0);
+  assert.ok(familyReadyIndex > planInsertIndex);
 });
 
 test("worker nao executa dois jobs ao mesmo tempo", async () => {

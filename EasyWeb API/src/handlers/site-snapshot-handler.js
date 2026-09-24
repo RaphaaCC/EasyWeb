@@ -47,7 +47,23 @@ function normalizePage(page) {
     throw createValidationError("O caminho do snapshot é inválido.");
   }
 
-  return { origin, path: page.path };
+  const path = page.path.split("/").map((segment) => {
+    if (!segment || segment === ":id" || segment === ":private") return segment;
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch (error) {
+      // A normalização abaixo ainda limita segmentos que pareçam identificadores.
+    }
+    if (/^\d{4,}$/.test(decoded)) return ":id";
+    if (/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(decoded)) return ":id";
+    if (decoded.includes("@") || /^[a-f\d]{16,}$/i.test(decoded) || /^[a-z\d_-]{24,}$/i.test(decoded)) {
+      return ":private";
+    }
+    return segment.slice(0, 120);
+  }).join("/");
+
+  return { origin, path: path || "/" };
 }
 
 function normalizeStructuralHtml(value) {
@@ -287,5 +303,15 @@ export function createSiteSnapshotHandler({ database } = {}) {
     };
   }
 
-  return Object.freeze({ prepare, store });
+  async function deleteForInstallation({ installationId, retentionHandler } = {}) {
+    if (typeof installationId !== "string" || !/^[a-z\d-]{16,128}$/i.test(installationId)) {
+      throw createValidationError("A identificacao da instalacao e invalida.");
+    }
+    if (!retentionHandler?.deleteInstallationSnapshots) {
+      throw Object.assign(new Error("Retencao de snapshots indisponivel."), { code: "EASYWEB_RETENTION_UNAVAILABLE" });
+    }
+    return retentionHandler.deleteInstallationSnapshots(hash(installationId));
+  }
+
+  return Object.freeze({ prepare, store, deleteForInstallation });
 }

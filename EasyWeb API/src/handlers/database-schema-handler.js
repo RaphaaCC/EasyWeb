@@ -1,4 +1,4 @@
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 5;
 
 const TABLES = Object.freeze([
   {
@@ -196,6 +196,7 @@ const TABLES = Object.freeze([
 ]);
 
 const TABLE_NAMES = TABLES.map(({ name }) => name);
+const OBSOLETE_TABLES = Object.freeze(["easyweb_installations"]);
 
 function quoteIdentifier(value) {
   if (typeof value !== "string" || !/^[A-Za-z0-9_]+$/.test(value)) {
@@ -244,6 +245,21 @@ async function readColumns(database) {
     TABLE_NAMES
   );
   return groupColumns(result.rows);
+}
+
+async function removeObsoleteTables(database, changes) {
+  const placeholders = OBSOLETE_TABLES.map(() => "?").join(", ");
+  const result = await database.query(
+    `SELECT TABLE_NAME AS tableName
+     FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${placeholders})`,
+    OBSOLETE_TABLES
+  );
+  for (const row of result.rows || []) {
+    if (!OBSOLETE_TABLES.includes(row.tableName)) continue;
+    await database.query(`DROP TABLE ${quoteIdentifier(row.tableName)}`);
+    changes.push({ table: row.tableName, operation: "drop-obsolete-table", name: row.tableName });
+  }
 }
 
 async function readIndexes(database) {
@@ -312,11 +328,13 @@ export async function synchronizeDatabaseSchema(database) {
     return { synchronized: false, reason: "not-configured", schemaVersion: SCHEMA_VERSION, tables: [], changes: [] };
   }
 
+  const changes = [];
+  await removeObsoleteTables(database, changes);
+
   for (const table of TABLES) {
     await database.query(table.createStatement);
   }
 
-  const changes = [];
   const columnsByTable = await readColumns(database);
   for (const table of TABLES) {
     await ensureColumns(database, table, columnsByTable.get(table.name), changes);

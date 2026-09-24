@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_VERSION = 4;
+  const CONTENT_VERSION = 5;
   const hasExtensionContext = globalThis.chrome?.runtime?.onMessage &&
     globalThis.chrome?.storage?.local;
   const hasHandlers = globalThis.EasyWebSettingsHandler &&
@@ -228,7 +228,18 @@
   }
 
   function setAiAdaptationStatus(status) {
+    const currentPersonalRequestId = aiAdaptationStatus.personalRequestId;
+    const currentPersonalRequestPending = aiAdaptationStatus.scope === "personal" &&
+      ["queued", "analyzing-personal", "processing"].includes(aiAdaptationStatus.state);
+    if (status?.scope === "base" && currentPersonalRequestPending) {
+      return false;
+    }
+    if (status?.scope === "personal" && currentPersonalRequestId &&
+      status.requestId && status.requestId !== currentPersonalRequestId) {
+      return false;
+    }
     aiAdaptationStatus = { ...aiAdaptationStatus, ...status };
+    return true;
   }
 
   async function getApiConnectionStatus() {
@@ -309,7 +320,7 @@
       }
     }
 
-    const hasValidBasePlan = Boolean(plans.base?.plan && aiAdaptation.validatePlan(plans.base.plan));
+    const hasValidBasePlan = Boolean(plans.base?.plan && aiAdaptation.hasActionablePlan(plans.base.plan));
     const lookup = !hasValidBasePlan ? await requestAvailableAiPlan(preferences) : null;
 
     if (appliedScopes.length) {
@@ -366,7 +377,7 @@
     }
   }
 
-  async function applyIncomingAiPlan(plan, { profileId } = {}) {
+  async function applyIncomingAiPlan(plan, { profileId, requestId } = {}) {
     if (!currentConfig) {
       return { applied: false, reason: "not-active-for-current-tab" };
     }
@@ -390,9 +401,20 @@
       });
       return { applied: false, reason: "plan-application-failed" };
     }
-    if (!result.applied) return result;
+    if (!result.applied) {
+      if (result.reason === "empty-plan") {
+        setAiAdaptationStatus({
+          state: "no-compatible-adjustment",
+          message: "A IA não encontrou um ajuste seguro e perceptível para aplicar nesta página."
+        });
+      }
+      return result;
+    }
     setAiAdaptationStatus({
       state: "active",
+      scope: plan.planScope === "personal" ? "personal" : "base",
+      requestId: plan.planScope === "personal" ? requestId || null : undefined,
+      personalRequestId: plan.planScope === "personal" ? null : undefined,
       message: plan.planScope === "personal"
         ? "Seu ajuste pessoal de IA foi aplicado nesta página."
         : "A adaptação de IA foi aplicada nesta estrutura de página."
@@ -452,9 +474,10 @@
       return { accepted: false, reason: "Não foi possível preparar a estrutura desta página." };
     }
     snapshot.templateFingerprint = await createTemplateFingerprint(snapshot);
+    const requestId = crypto.randomUUID();
     const response = await chrome.runtime.sendMessage({
       type: "easyweb:adaptation:personal-request",
-      requestId: crypto.randomUUID(),
+      requestId,
       snapshot,
       basePlanId: basePlan?.planId || null,
       profile: currentConfig.profileId,
@@ -464,6 +487,9 @@
     if (response?.accepted) {
       setAiAdaptationStatus({
         state: response.state || "analyzing-personal",
+        scope: "personal",
+        requestId,
+        personalRequestId: requestId,
         message: response.message || "A IA está preparando seus ajustes adicionais."
       });
     }
@@ -734,7 +760,7 @@
           const profileId = typeof message.profileId === "string" && message.profileId
             ? message.profileId
             : currentConfig.profileId;
-          const immediate = await applyIncomingAiPlan(message.plan, { profileId });
+          const immediate = await applyIncomingAiPlan(message.plan, { profileId, requestId: message.requestId });
           if (immediate.applied) {
             try {
               await settings.saveAiPersonalPlan(message.plan, profileId);

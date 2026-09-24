@@ -15,6 +15,8 @@ const operationModeStatus = document.querySelector("#operation-mode-status");
 const apiSection = document.querySelector(".api-section");
 const mappingSection = document.querySelector(".mapping-section");
 const aiSection = document.querySelector(".ai-section");
+const deleteRemoteSnapshotsButton = document.querySelector("#delete-remote-snapshots");
+const snapshotDeletionStatus = document.querySelector("#snapshot-deletion-status");
 const status = document.querySelector("#save-status");
 
 function setStatus(message) {
@@ -281,6 +283,23 @@ developerModeToggle.addEventListener("change", () => {
 });
 
 apiBaseUrl.addEventListener("change", saveApiConfiguration);
+
+deleteRemoteSnapshotsButton.addEventListener("click", async () => {
+  const confirmed = window.confirm("Remover todos os snapshots desta instalação na API? Planos que dependam apenas deles também poderão ser descartados.");
+  if (!confirmed) return;
+  deleteRemoteSnapshotsButton.disabled = true;
+  snapshotDeletionStatus.textContent = "Solicitando remoção segura à API...";
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "easyweb:privacy:delete-snapshots" });
+    snapshotDeletionStatus.textContent = result?.deleted
+      ? `${result.snapshots || 0} snapshot(s) removido(s) da API.`
+      : result?.reason || "A API não conseguiu remover os snapshots.";
+  } catch (error) {
+    snapshotDeletionStatus.textContent = "Não foi possível solicitar a remoção dos snapshots.";
+  } finally {
+    deleteRemoteSnapshotsButton.disabled = false;
+  }
+});
 
 mappingConsentToggle.addEventListener("change", saveMappingConsent);
 aiRecommendationsToggle.addEventListener("change", saveAiRecommendations);

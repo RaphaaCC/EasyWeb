@@ -1,5 +1,5 @@
 (() => {
-  const HANDLER_VERSION = 2;
+  const HANDLER_VERSION = 5;
   const SITE_SCRIPT_VERSION = 1;
   const MAX_STEPS = 8;
   const ALLOWED_TRIGGERS = new Set(["document-ready", "route-change"]);
@@ -13,8 +13,13 @@
     "contrast-support",
     "reduced-motion",
     "large-controls",
-    "content-width"
+    "content-width",
+    "navigation-clarity",
+    "form-legibility",
+    "heading-clarity",
+    "text-color"
   ]);
+  const ALLOWED_TEXT_COLORS = new Set(["#005fcc", "#b00020", "#006b3c", "#000000", "#ffffff", "#6a1b9a"]);
   const STYLE_IDS = Object.freeze({
     base: "easyweb-ai-base-style",
     personal: "easyweb-ai-personal-style"
@@ -30,6 +35,19 @@
     controls: ":where(button, input, select, textarea, summary, [role=\"button\"], [role=\"checkbox\"], [role=\"tab\"])",
     document: ":root"
   });
+  const CONTROL_SIZE_SELECTOR = [
+    "button",
+    "input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]):not([type=file]):not([type=color])",
+    "select",
+    "textarea",
+    "summary",
+    "[role=button]",
+    "[role=tab]",
+    "[role=menuitem]"
+  ].map((selector) => `:where(${selector})`).join(", ");
+  const NAVIGATION_SELECTOR = ':where(nav, [role="navigation"], [role="menubar"], [role="tablist"])';
+  const FORM_SELECTOR = ':where(form, [role="form"])';
+  const FORM_CONTROL_SELECTOR = ':where(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]):not([type=file]):not([type=color]), select, textarea)';
 
   function clamp(value, minimum, maximum, fallback = minimum) {
     const number = Number(value);
@@ -59,6 +77,10 @@
     if (preset === "control-boundaries") return { width: clamp(parameters.width, 1, 3, 2) };
     if (preset === "large-controls") return { minimumSize: clamp(parameters.minimumSize, 36, 48, 40) };
     if (preset === "content-width") return { maxWidth: clamp(parameters.maxWidth, 42, 90, 68) };
+    if (preset === "text-color") {
+      const color = String(parameters.color || "").trim().toLowerCase();
+      return { color: ALLOWED_TEXT_COLORS.has(color) ? color : "#005fcc" };
+    }
     return {};
   }
 
@@ -127,6 +149,11 @@
     return SELECTORS[scope] || SELECTORS.document;
   }
 
+  function hasActionablePlan(plan) {
+    const validPlan = validatePlan(plan);
+    return Boolean(validPlan?.siteScript?.steps?.length);
+  }
+
   function compileStep(step) {
     const selector = selectorFor(step.target);
     const p = step.parameters;
@@ -146,9 +173,17 @@
       case "reduced-motion":
         return ":where(*, *::before, *::after) { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }";
       case "large-controls":
-        return `${SELECTORS.controls} { min-height: ${p.minimumSize}px !important; min-width: ${p.minimumSize}px !important; }`;
+        return `${CONTROL_SIZE_SELECTOR} { box-sizing: border-box !important; min-block-size: ${p.minimumSize}px !important; min-inline-size: ${p.minimumSize}px !important; padding-block: max(0.45em, 6px) !important; padding-inline: max(0.7em, 10px) !important; font-size: max(1em, 16px) !important; line-height: 1.25 !important; }`;
       case "content-width":
         return `${SELECTORS["main-content"]} { max-width: ${p.maxWidth}ch !important; }`;
+      case "navigation-clarity":
+        return `${NAVIGATION_SELECTOR} { line-height: 1.35 !important; }\n${NAVIGATION_SELECTOR} :where(a[href], button, [role="link"], [role="button"], [role="menuitem"], [role="tab"]) { min-block-size: 40px !important; padding-block: max(0.3em, 4px) !important; padding-inline: max(0.55em, 8px) !important; margin: 2px !important; }`;
+      case "form-legibility":
+        return `${FORM_SELECTOR} :where(label, legend) { display: block !important; font-weight: 700 !important; line-height: 1.4 !important; margin-block-end: 0.35rem !important; }\n${FORM_SELECTOR} ${FORM_CONTROL_SELECTOR} { min-block-size: 44px !important; font-size: max(1em, 16px) !important; line-height: 1.3 !important; padding: max(0.45em, 6px) max(0.6em, 9px) !important; }`;
+      case "heading-clarity":
+        return `${SELECTORS["main-content"]} :where(h1, h2, h3, h4, h5, h6) { line-height: 1.22 !important; scroll-margin-block-start: 1rem !important; }\n${SELECTORS["main-content"]} :where(h2, h3, h4, h5, h6) { margin-block-start: 1.35em !important; }`;
+      case "text-color":
+        return `:where(body, main, article, section, header, footer, nav, aside, p, span, li, dt, dd, th, td, label, legend, blockquote, h1, h2, h3, h4, h5, h6) { color: ${p.color} !important; }`;
       default:
         return "";
     }
@@ -158,7 +193,7 @@
     const validPlan = validatePlan(plan);
     if (!validPlan) return null;
     const css = validPlan.siteScript.steps.map(compileStep).filter(Boolean).join("\n");
-    if (css.length > 12_000) return null;
+    if (!css || css.length > 12_000) return null;
     return {
       css: `@layer easyweb-ai-${validPlan.planScope} {\n${css}\n}`,
       handlerVersion: HANDLER_VERSION,
@@ -227,6 +262,8 @@
   }
 
   function apply(plan) {
+    if (!validatePlan(plan)) return { applied: false, reason: "invalid-plan" };
+    if (!hasActionablePlan(plan)) return { applied: false, reason: "empty-plan" };
     const compiled = compilePlan(plan);
     if (!compiled) return { applied: false, reason: "invalid-plan" };
     activeCompiled[compiled.planScope] = compiled;
@@ -237,7 +274,7 @@
 
   function applyCached(plan, cached) {
     const validPlan = validatePlan(plan);
-    if (!validPlan || !isPlainObject(cached) || cached.handlerVersion !== HANDLER_VERSION ||
+    if (!validPlan || !validPlan.siteScript.steps.length || !isPlainObject(cached) || cached.handlerVersion !== HANDLER_VERSION ||
       cached.siteScriptVersion !== SITE_SCRIPT_VERSION || typeof cached.css !== "string" || cached.css.length > 12_000 ||
       !cached.css.startsWith(`@layer easyweb-ai-${validPlan.planScope} {`)) {
       return { applied: false, reason: "invalid-cache" };
@@ -258,6 +295,7 @@
     HANDLER_VERSION,
     SITE_SCRIPT_VERSION,
     validatePlan,
+    hasActionablePlan,
     compilePlan,
     apply,
     applyCached,

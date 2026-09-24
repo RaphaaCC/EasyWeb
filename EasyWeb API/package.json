@@ -1,8 +1,8 @@
 {
   "name": "easyweb-api",
-  "version": "0.1.0-development",
+  "version": "1.0.0-beta.0",
   "private": true,
-  "description": "API REST para os recursos de acessibilidade da EasyWeb.",
+  "description": "API REST e WebSocket para os recursos de acessibilidade do EasyWeb.",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",

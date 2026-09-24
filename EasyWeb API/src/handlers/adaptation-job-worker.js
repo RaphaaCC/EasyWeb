@@ -5,7 +5,7 @@ function readPositiveInteger(value, fallback) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export function createAdaptationJobWorker({ adaptationService, intervalMs, logger = console } = {}) {
+export function createAdaptationJobWorker({ adaptationService, intervalMs, logger = {} } = {}) {
   if (typeof adaptationService?.processNextBaseJob !== "function") {
     throw new TypeError("O worker exige um servico de adaptacao com fila persistente.");
   }
@@ -20,11 +20,17 @@ export function createAdaptationJobWorker({ adaptationService, intervalMs, logge
     try {
       const result = await adaptationService.processNextBaseJob();
       if (result?.state === "failed") {
-        logger.warn?.(`[adaptation] job ${result.jobId || "unknown"} failed: ${result.reason || "unknown"}`);
+        logger.warn?.("adaptation.job.failed", {
+          jobId: result.jobId || "unknown",
+          reason: result.reason || "unknown"
+        });
       }
       return result;
     } catch (error) {
-      logger.error?.("[adaptation] persistent worker failed", error?.code || error?.message || "unknown");
+      logger.error?.("adaptation.worker.failed", {
+        code: error?.code || "unknown",
+        reason: error?.message || "unknown"
+      });
       return { state: "error" };
     } finally {
       running = false;

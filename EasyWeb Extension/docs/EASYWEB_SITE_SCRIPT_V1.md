@@ -66,8 +66,12 @@ Os valores aceitos para `preset` sao:
 - `control-boundaries`: `width` de `1` a `3`
 - `contrast-support`
 - `reduced-motion`
-- `large-controls`: `minimumSize` de `36` a `48`
+- `large-controls`: `minimumSize` de `36` a `48`; amplia a área mínima e a apresentação visual de botões, campos e controles compatíveis
 - `content-width`: `maxWidth` de `42` a `90`
+- `navigation-clarity`: aumenta a separação e a área de acionamento dos controles de navegação
+- `form-legibility`: reforça rótulos e o tamanho legível de campos compatíveis
+- `heading-clarity`: melhora a leitura e a navegação por títulos do conteúdo principal
+- `text-color`: parâmetro `color` limitado a `#005fcc`, `#b00020`, `#006b3c`, `#000000`, `#ffffff` ou `#6a1b9a`
 
 Ha no maximo oito passos. Um passo diferente de `apply-style`, um alvo ou
 preset desconhecido, ou qualquer parametro fora do limite e removido ou
@@ -85,6 +89,11 @@ armazenamento local da instalacao, e aplicado depois na camada pessoal. Remover
 essas duas folhas restaura a apresentacao do site e preserva o perfil normal
 do EasyWeb.
 
+Para pedidos pessoais reconhecidos, a API exige uma etapa compatível com a
+intenção. Por exemplo, `small-controls` exige `large-controls`; se o modelo
+responder sem essa etapa, o EasyWeb acrescenta a regra local limitada antes de
+entregar o plano. Um plano sem nenhuma etapa não é apresentado como aplicado.
+
 ## Entrega e cache
 
 1. A API envia um plano base concluido aos sockets inscritos naquela origem ou
@@ -92,8 +101,10 @@ do EasyWeb.
 2. O service worker encaminha o plano base para as abas abertas da mesma
    origem. O plano pessoal vai para a aba solicitante e mantem o perfil usado
    no pedido.
-3. Ao receber o plano, o content script compila e injeta a folha na propria
-   aba antes de aguardar sua persistencia no `chrome.storage.local`.
+3. Ao receber o plano pessoal, o service worker o salva primeiro no
+   `chrome.storage.local` e também o entrega diretamente à aba. O content
+   script compila e injeta a folha de imediato; a gravação é uma segunda via de
+   aplicação caso a aba navegue durante a entrega.
 4. O plano e o CSS compilado sao guardados para o proximo acesso. O cache usa
    as versoes do handler e do Site Script; uma mudanca de versao invalida o
    CSS antigo e recompila a partir do plano validado.

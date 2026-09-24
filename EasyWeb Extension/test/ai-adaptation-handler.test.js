@@ -131,3 +131,90 @@ test("reinstalls an active style after a SPA replaces the document head", async 
 
   assert.equal(elements.get("easyweb-ai-base-style").dataset.easywebAiPlan, plan.planId);
 });
+
+test("amplia visualmente os controles em um plano pessoal", () => {
+  const { handler, elements } = loadHandler();
+  const plan = {
+    schemaVersion: 1,
+    planId: "personal:example:buttons",
+    planScope: "personal",
+    origin: "https://example.com",
+    siteScript: {
+      version: 1,
+      triggers: ["document-ready"],
+      steps: [{ type: "apply-style", target: "controls", preset: "large-controls", parameters: { minimumSize: 48 } }]
+    }
+  };
+
+  assert.equal(handler.apply(plan).applied, true);
+  const css = elements.get("easyweb-ai-personal-style").textContent;
+  assert.match(css, /min-block-size: 48px/);
+  assert.match(css, /padding-inline/);
+  assert.match(css, /font-size: max\(1em, 16px\)/);
+});
+
+test("não apresenta plano sem etapas como uma adaptação aplicada", () => {
+  const { handler } = loadHandler();
+  const plan = {
+    schemaVersion: 1,
+    planId: "personal:example:empty",
+    planScope: "personal",
+    origin: "https://example.com",
+    siteScript: { version: 1, triggers: ["document-ready"], steps: [] }
+  };
+
+  const result = handler.apply(plan);
+  assert.equal(result.applied, false);
+  assert.equal(result.reason, "empty-plan");
+});
+
+test("compila melhorias limitadas para navegação, formulários e hierarquia de leitura", () => {
+  const { handler, elements } = loadHandler();
+  const plan = {
+    schemaVersion: 1,
+    planId: "personal:example:clarity",
+    planScope: "personal",
+    origin: "https://example.com",
+    siteScript: {
+      version: 1,
+      triggers: ["document-ready"],
+      steps: [
+        { type: "apply-style", target: "document", preset: "navigation-clarity", parameters: {} },
+        { type: "apply-style", target: "controls", preset: "form-legibility", parameters: {} },
+        { type: "apply-style", target: "main-content", preset: "heading-clarity", parameters: {} }
+      ]
+    }
+  };
+
+  assert.equal(handler.apply(plan).applied, true);
+  const css = elements.get("easyweb-ai-personal-style").textContent;
+  assert.match(css, /role="navigation"/);
+  assert.match(css, /font-weight: 700/);
+  assert.match(css, /scroll-margin-block-start/);
+});
+
+test("compila uma cor pessoal somente a partir da paleta segura", () => {
+  const { handler } = loadHandler();
+  const basePlan = {
+    schemaVersion: 1,
+    planId: "personal:example:color",
+    planScope: "personal",
+    origin: "https://example.com",
+    siteScript: {
+      version: 1,
+      triggers: ["document-ready"],
+      steps: [{ type: "apply-style", target: "document", preset: "text-color", parameters: { color: "#b00020" } }]
+    }
+  };
+
+  assert.match(handler.compilePlan(basePlan).css, /color: #b00020 !important/);
+  const normalized = handler.validatePlan({
+    ...basePlan,
+    planId: "personal:example:unsafe-color",
+    siteScript: {
+      ...basePlan.siteScript,
+      steps: [{ type: "apply-style", target: "document", preset: "text-color", parameters: { color: "url(javascript:alert(1))" } }]
+    }
+  });
+  assert.equal(normalized.siteScript.steps[0].parameters.color, "#005fcc");
+});
