@@ -70,6 +70,8 @@ O modo Aprimorado exige consentimento global e autorização individual para cad
 
 Quando habilitada, a IA recebe snapshots protegidos e devolve um plano limitado a presets conhecidos, como legibilidade, títulos, navegação, formulários, foco, espaçamento, controles visualmente maiores e cores de texto de uma paleta segura. A extensão valida o plano e compila sua própria camada CSS. As chamadas ao Gemini entram em uma fila serial, com prioridade para pedidos pessoais do popup; planos base podem ser armazenados pela API, enquanto pedidos pessoais permanecem apenas na extensão que os solicitou.
 
+Leia a [Política de Privacidade](PRIVACY.md) para entender quais dados podem ser salvos localmente, enviados à API e processados por IA.
+
 ## Testes
 
 ```powershell
