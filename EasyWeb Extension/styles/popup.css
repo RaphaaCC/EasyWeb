@@ -30,17 +30,11 @@ body {
   border-bottom: 1px solid #dce8e5;
 }
 
-.brand-mark {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 10px;
-  background: #16ad9d;
-  color: white;
-  font-size: 24px;
-  font-weight: 800;
-  box-shadow: 3px 3px 0 #ffbf47;
+.brand-logo {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  object-fit: contain;
 }
 
 h1,

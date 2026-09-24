@@ -2,7 +2,7 @@
 
 > Tornando a Web mais democrática e acessível para todas as pessoas.
 
-![Versão](https://img.shields.io/badge/versão-v1.0.2%20Beta-00a99d?style=flat-square)
+![Versão](https://img.shields.io/badge/versão-v1.0.3%20Beta-00a99d?style=flat-square)
 ![Licença](https://img.shields.io/badge/licença-MIT-2563eb?style=flat-square)
 ![Chrome](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)

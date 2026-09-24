@@ -32,18 +32,11 @@ body {
   border-bottom: 1px solid #d5e4df;
 }
 
-.brand-mark {
-  display: grid;
-  width: 52px;
-  height: 52px;
+.brand-logo {
+  width: 72px;
+  height: 72px;
   flex: 0 0 auto;
-  place-items: center;
-  border-radius: 12px;
-  background: #16ad9d;
-  color: white;
-  font-size: 31px;
-  font-weight: 800;
-  box-shadow: 4px 4px 0 #ffbf47;
+  object-fit: contain;
 }
 
 .eyebrow {
