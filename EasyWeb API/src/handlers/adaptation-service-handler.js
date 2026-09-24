@@ -510,20 +510,6 @@ export function createAdaptationService({ database, gemini, aiQueue, now = () =>
     return plan?.origin === origin ? plan : null;
   }
 
-  async function loadLatestActivePlanForOrigin(origin) {
-    const result = await database.query(
-      `SELECT plans.plan_json
-       FROM easyweb_adaptation_base_plans AS plans
-       INNER JOIN easyweb_adaptation_families AS families ON families.id = plans.family_id
-       WHERE families.origin_hash = ? AND plans.status = 'active' AND plans.expires_at > UTC_TIMESTAMP()
-       ORDER BY plans.updated_at DESC, plans.id DESC
-       LIMIT 1`,
-      [hash(origin)]
-    );
-    const plan = result.rows?.[0] ? parsePlan(result.rows[0]) : null;
-    return plan?.origin === origin ? plan : null;
-  }
-
   async function persistFamily(origin, candidate, status = "observing") {
     const { pair, adaptationFingerprint, similarity, confidence } = candidate;
     await database.query(
@@ -769,8 +755,7 @@ export function createAdaptationService({ database, gemini, aiQueue, now = () =>
       await persistFamily(origin, candidate, candidate.state === "eligible" ? "eligible" : "observing");
     }
     if (candidate.state !== "eligible") {
-      const existing = await loadLatestActivePlanForOrigin(origin);
-      return existing ? { state: "ready", plan: existing, source: "origin-cache" } : publicCandidate(candidate);
+      return publicCandidate(candidate);
     }
     const existing = await loadActivePlan(candidate.adaptationFingerprint, origin);
     if (existing) return { state: "ready", plan: existing };
@@ -783,8 +768,7 @@ export function createAdaptationService({ database, gemini, aiQueue, now = () =>
     if (!database?.configured) return { state: "storage-unavailable" };
     const candidate = resolveCandidate(await recentSnapshots(origin));
     if (candidate.state !== "eligible") {
-      const existing = await loadLatestActivePlanForOrigin(origin);
-      return existing ? { state: "ready", plan: existing, source: "origin-cache" } : publicCandidate(candidate);
+      return publicCandidate(candidate);
     }
     const plan = await loadActivePlan(candidate.adaptationFingerprint, origin);
     if (plan) return { state: "ready", plan };

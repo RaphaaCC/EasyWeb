@@ -263,11 +263,44 @@ test("transforma um pedido explícito de cor em uma alteração de texto segura"
     step.preset === "text-color" && step.parameters.color === "#005fcc"), true);
 });
 
-test("entrega um plano ativo do mesmo site quando as observações atuais ainda não são confiáveis", async () => {
+test("não reutiliza um plano apenas pela origem quando a estrutura atual ainda não é confiável", async () => {
   const snapshot = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "h1", headingLevel: 1 }] });
+  let originCacheQueries = 0;
+  const service = createAdaptationService({
+    database: {
+      configured: true,
+      query: async (statement) => {
+        if (/easyweb_site_snapshots/.test(statement)) {
+          return { rows: [createRow("a", snapshot, 1, 1)] };
+        }
+        if (/INNER JOIN easyweb_adaptation_families/.test(statement)) {
+          originCacheQueries += 1;
+          return { rows: [] };
+        }
+        return { rows: [] };
+      }
+    },
+    gemini: { configured: false }
+  });
+
+  assert.deepEqual(await service.lookup({ origin: "https://example.com" }), {
+    state: "awaiting-second-snapshot"
+  });
+  assert.equal(originCacheQueries, 0);
+});
+
+test("reutiliza um plano quando a família atual é elegível e o fingerprint é compatível", async () => {
+  const first = createSnapshot({ tag: "main", landmark: true, children: [{ tag: "h1", headingLevel: 1 }] });
+  const second = createSnapshot({
+    tag: "main",
+    landmark: true,
+    children: [{ tag: "h1", headingLevel: 1 }, { tag: "p" }]
+  });
+  second.page.path = "/sobre";
+  const rows = [createRow("a", first, 1, 1), createRow("b", second, 2, 2)];
   const storedPlan = {
     schemaVersion: 1,
-    planId: "base:example:cached:v1",
+    planId: "base:example:compatible:v1",
     planScope: "base",
     origin: "https://example.com",
     actions: []
@@ -277,9 +310,9 @@ test("entrega um plano ativo do mesmo site quando as observações atuais ainda 
       configured: true,
       query: async (statement) => {
         if (/easyweb_site_snapshots/.test(statement)) {
-          return { rows: [createRow("a", snapshot, 1, 1)] };
+          return { rows };
         }
-        if (/INNER JOIN easyweb_adaptation_families/.test(statement)) {
+        if (/WHERE family_id = \(/.test(statement)) {
           return { rows: [{ plan_json: JSON.stringify(storedPlan) }] };
         }
         return { rows: [] };
@@ -290,7 +323,6 @@ test("entrega um plano ativo do mesmo site quando as observações atuais ainda 
 
   assert.deepEqual(await service.lookup({ origin: "https://example.com" }), {
     state: "ready",
-    plan: storedPlan,
-    source: "origin-cache"
+    plan: storedPlan
   });
 });
