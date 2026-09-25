@@ -136,7 +136,7 @@ test("mantém a página de configurações navegável na versão beta", async ()
   await expect(page.locator('.brand-logo[src="assets/icons/easyweb-128.png"]')).toBeVisible();
   await expect.poll(() => page.locator(".brand-logo").evaluate((image) => image.naturalWidth)).toBe(128);
   await expect(page.locator("#profile-grid .profile-card")).toHaveCount(9);
-  await expect(page.locator("footer")).toContainText("v1.0.3 Beta");
+  await expect(page.locator("footer")).toContainText("v1.0.4 Beta");
   await expect(page.locator(".api-section")).toBeHidden();
 
   await page.locator('input[name="operation-mode"][value="enhanced"]').check();
@@ -155,6 +155,6 @@ test("exibe a identidade visual no cabeçalho do popup", async () => {
   await expect(logo).toBeVisible();
   await expect(logo).toHaveAttribute("alt", "Logotipo do EasyWeb");
   await expect.poll(() => logo.evaluate((image) => image.naturalWidth)).toBe(128);
-  await expect(page.locator(".version")).toHaveText("v1.0.3 Beta");
+  await expect(page.locator(".version")).toHaveText("v1.0.4 Beta");
   await page.close();
 });

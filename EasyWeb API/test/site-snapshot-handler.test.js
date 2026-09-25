@@ -66,7 +66,7 @@ test("armazena somente o snapshot sanitizado e comprimido", async () => {
   assert.equal(payload.styles.ignoredCss, undefined);
   assert.equal(payload.scripts.sourceCode, undefined);
   assert.equal(payload.html, "<html><body><main><h1></h1><a></a></main></body></html>");
-  assert.match(payload.css, /background-image: url\(\)/);
+  assert.equal(payload.css, "style{color:rgb(1, 2, 3)}");
   assert.deepEqual(payload.styles.externalOrigins, ["https://cdn.example.com"]);
 });
 
@@ -106,7 +106,7 @@ test("filtra HTML e CSS sensíveis sem rejeitar um snapshot estrutural", async (
     '<p>Conteúdo privado</p><script>window.token = "secret"</script>',
     '</main></body></html>'
   ].join("");
-  snapshot.css = '@import url("https://private.example/style.css"); main { background: url(https://private.example/image.png); }';
+  snapshot.css = '@import url("https://private.example/style.css"); [data-account-id="ana@example.com"]#user-123456 { color: #123456; font-size: 16px; background-image: url(https://private.example/image.png); font-family: ana-private; content: "secret"; }';
 
   await handler.store({
     installationId: "ca5ce777-31e1-4892-b93c-9d282b0732f7",
@@ -117,5 +117,6 @@ test("filtra HTML e CSS sensíveis sem rejeitar um snapshot estrutural", async (
   assert.equal(payload.html, "<html><body><main><form><input></form><p></p></main></body></html>");
   assert.doesNotMatch(payload.html, /ana@example|secret|class|data-user|script/i);
   assert.doesNotMatch(payload.css, /@import|https:|private\.example/i);
-  assert.match(payload.css, /url\(\)/);
+  assert.equal(payload.css, "style{color:#123456;font-size:16px}");
+  assert.doesNotMatch(payload.css, /ana@example|user-123456|data-account|private\.example|ana-private|secret|url\(/i);
 });

@@ -1,6 +1,6 @@
 # Planejamento: IA para Experiência Adaptativa do EasyWeb
 
-> **Status:** implementação beta em andamento na versão `v1.0.3 Beta`. O nível 1 já possui contrato WebSocket, armazenamento de planos base, integração com Gemini, validação de um catálogo fechado de ações, compilação local de CSS e cache local. Os recursos de níveis 2 e 3 continuam somente planejados.
+> **Status:** implementação beta em andamento na versão `v1.0.4 Beta`. O nível 1 já possui contrato WebSocket, armazenamento de planos base, integração com Gemini, validação de um catálogo fechado de ações, compilação local de CSS e cache local. Os recursos de níveis 2 e 3 continuam somente planejados.
 >
 > **Objetivo:** permitir que o EasyWeb use IA para recomendar e aplicar adaptações de acessibilidade e simplificação de navegação por site, de maneira reversível, verificável e controlada pelo usuário.
 

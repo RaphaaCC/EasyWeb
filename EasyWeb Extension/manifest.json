@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "EasyWeb",
   "description": "Tornando a Web mais democrática e acessível para todos",
-  "version": "1.0.3",
-  "version_name": "v1.0.3 Beta",
+  "version": "1.0.4",
+  "version_name": "v1.0.4 Beta",
   "icons": {
     "16": "assets/icons/easyweb-16.png",
     "32": "assets/icons/easyweb-32.png",

@@ -1,6 +1,6 @@
 (() => {
   const MAPPING_CAPTURE_POLICY = Object.freeze({
-    version: 4,
+    version: 5,
     allowedData: Object.freeze([
       "sanitized-structural-html",
       "sanitized-accessible-css",
@@ -231,16 +231,152 @@
     return clone.outerHTML.slice(0, MAX_HTML_CHARACTERS);
   }
 
+
+  const SAFE_CSS_PROPERTIES = new Set([
+    "color", "background-color",
+    "border-color", "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+    "outline-color", "text-decoration-color", "fill", "stroke",
+    "font-size", "font-weight", "line-height", "letter-spacing", "word-spacing",
+    "text-align", "text-decoration-line", "text-decoration-style", "text-decoration-thickness",
+    "display", "visibility", "opacity", "position", "box-sizing", "white-space",
+    "overflow", "overflow-x", "overflow-y", "object-fit",
+    "width", "min-width", "max-width", "height", "min-height", "max-height",
+    "margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+    "gap", "row-gap", "column-gap",
+    "border-width", "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "outline-width", "border-radius", "border-top-left-radius", "border-top-right-radius",
+    "border-bottom-left-radius", "border-bottom-right-radius",
+    "flex-direction", "flex-wrap", "align-items", "justify-content"
+  ]);
+  const COLOR_CSS_PROPERTIES = new Set([
+    "color", "background-color",
+    "border-color", "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+    "outline-color", "text-decoration-color", "fill", "stroke"
+  ]);
+  const LENGTH_CSS_PROPERTIES = new Set([
+    "font-size", "letter-spacing", "word-spacing", "text-decoration-thickness",
+    "width", "min-width", "max-width", "height", "min-height", "max-height",
+    "margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+    "gap", "row-gap", "column-gap",
+    "border-width", "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "outline-width", "border-radius", "border-top-left-radius", "border-top-right-radius",
+    "border-bottom-left-radius", "border-bottom-right-radius"
+  ]);
+  const SAFE_CSS_ENUMS = Object.freeze({
+    "text-align": new Set(["left", "right", "center", "justify", "start", "end"]),
+    "text-decoration-line": new Set(["none", "underline", "overline", "line-through"]),
+    "text-decoration-style": new Set(["solid", "double", "dotted", "dashed", "wavy"]),
+    "display": new Set(["none", "block", "inline", "inline-block", "flex", "inline-flex", "grid", "inline-grid", "table", "contents"]),
+    "visibility": new Set(["visible", "hidden", "collapse"]),
+    "position": new Set(["static", "relative", "absolute", "fixed", "sticky"]),
+    "box-sizing": new Set(["content-box", "border-box"]),
+    "white-space": new Set(["normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces"]),
+    "overflow": new Set(["visible", "hidden", "clip", "scroll", "auto"]),
+    "overflow-x": new Set(["visible", "hidden", "clip", "scroll", "auto"]),
+    "overflow-y": new Set(["visible", "hidden", "clip", "scroll", "auto"]),
+    "object-fit": new Set(["fill", "contain", "cover", "none", "scale-down"]),
+    "flex-direction": new Set(["row", "row-reverse", "column", "column-reverse"]),
+    "flex-wrap": new Set(["nowrap", "wrap", "wrap-reverse"]),
+    "align-items": new Set(["stretch", "flex-start", "flex-end", "center", "baseline", "start", "end"]),
+    "justify-content": new Set(["flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly", "start", "end"])
+  });
+
+  function normalizeCssScalar(value) {
+    const token = value.trim().toLowerCase();
+    return /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|rem|em|%|ch|ex|vw|vh|vmin|vmax|pt)?$/.test(token)
+      ? token
+      : null;
+  }
+
+  function normalizeCssLengthList(value) {
+    const parts = value.trim().split(/\s+/);
+    if (parts.length < 1 || parts.length > 4) return null;
+    const normalized = parts.map((part) => normalizeCssScalar(part));
+    return normalized.every(Boolean) ? normalized.join(" ") : null;
+  }
+
+  function normalizeCssColor(value) {
+    const token = value.trim().toLowerCase();
+    if (/^#[a-f\d]{3,8}$/i.test(token)) return token;
+    if (/^rgba?\(\s*[-\d.%\s,\/]+\)$/i.test(token)) return token.replace(/\s+/g, " ");
+    if (/^hsla?\(\s*[-\d.%\s,\/]+\)$/i.test(token)) return token.replace(/\s+/g, " ");
+    return new Set(["transparent", "currentcolor", "black", "white", "gray", "grey", "red", "green", "blue"]).has(token)
+      ? token
+      : null;
+  }
+
+  function normalizeCssDeclaration(property, rawValue) {
+    const name = property.trim().toLowerCase();
+    if (!SAFE_CSS_PROPERTIES.has(name)) return null;
+    const value = rawValue.replace(/\s*!important\s*$/i, "").trim();
+    if (!value || value.length > 160 ||
+      /["'\\]/.test(value) || /\b(?:url|var|attr|env|expression)\s*\(/i.test(value) ||
+      /javascript\s*:|@/i.test(value)) {
+      return null;
+    }
+
+    if (COLOR_CSS_PROPERTIES.has(name)) {
+      const normalized = normalizeCssColor(value);
+      return normalized ? [name, normalized] : null;
+    }
+    if (LENGTH_CSS_PROPERTIES.has(name)) {
+      const normalized = normalizeCssLengthList(value);
+      return normalized ? [name, normalized] : null;
+    }
+    if (name === "line-height") {
+      const normalized = normalizeCssScalar(value);
+      return normalized ? [name, normalized] : null;
+    }
+    if (name === "font-weight") {
+      const token = value.toLowerCase();
+      return /^(?:normal|bold|bolder|lighter|[1-9]00)$/.test(token) ? [name, token] : null;
+    }
+    if (name === "opacity") {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) && numeric >= 0 && numeric <= 1 ? [name, String(numeric)] : null;
+    }
+    const allowed = SAFE_CSS_ENUMS[name];
+    const token = value.toLowerCase();
+    return allowed?.has(token) ? [name, token] : null;
+  }
+
+  function extractCssLeafBlocks(source) {
+    const blocks = [];
+    const stack = [];
+    for (let index = 0; index < source.length; index += 1) {
+      const character = source[index];
+      if (character === "{") {
+        if (stack.length) stack[stack.length - 1].nested = true;
+        stack.push({ start: index + 1, nested: false });
+      } else if (character === "}" && stack.length) {
+        const block = stack.pop();
+        if (!block.nested) blocks.push(source.slice(block.start, index));
+      }
+    }
+    return blocks;
+  }
+
+  function structuralizeCss(cssText) {
+    const source = typeof cssText === "string" ? cssText : "";
+    const blocks = extractCssLeafBlocks(source.replace(/\/\*[\s\S]*?\*\//g, ""));
+    const result = [];
+    for (const block of blocks) {
+      const declarations = [];
+      for (const part of block.split(";")) {
+        const separator = part.indexOf(":");
+        if (separator <= 0) continue;
+        const normalized = normalizeCssDeclaration(part.slice(0, separator), part.slice(separator + 1));
+        if (normalized) declarations.push(normalized[0] + ":" + normalized[1]);
+      }
+      if (declarations.length) result.push("style{" + declarations.join(";") + "}");
+    }
+    return result.join("\n").slice(0, MAX_CSS_CHARACTERS);
+  }
+
   function sanitizeCss(cssText) {
-    return cssText
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/@import[^;]*;/gi, "")
-      .replace(/@font-face\s*\{[^}]*\}/gi, "")
-      .replace(/url\(\s*[^)]*\)/gi, "url()")
-      .replace(/\bcontent\s*:\s*[^;}]+[;}]/gi, "")
-      .replace(/\b(?:behavior|expression)\s*:[^;}]+[;}]/gi, "")
-      .replace(/javascript\s*:/gi, "")
-      .trim();
+    return structuralizeCss(cssText);
   }
 
   function createSanitizedCss(documentLike) {
@@ -289,5 +425,5 @@
     };
   }
 
-  globalThis.EasyWebMappingSecurityHandler = { MAPPING_CAPTURE_POLICY, assess, createSnapshot, sanitizePath };
+  globalThis.EasyWebMappingSecurityHandler = { MAPPING_CAPTURE_POLICY, assess, createSnapshot, sanitizePath, sanitizeCss };
 })();

@@ -108,7 +108,7 @@ function loadBackground() {
     },
     chrome: {
       runtime: {
-        getManifest: () => ({ version_name: "v1.0.3 Beta" }),
+        getManifest: () => ({ version_name: "v1.0.4 Beta" }),
         onMessage: { addListener(listener) { messageListener = listener; } },
         onStartup: { addListener() {} }
       },
