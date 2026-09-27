@@ -33,7 +33,7 @@ test("entrega plano base concluido pelo worker aos sockets inscritos", async (co
     }
   };
   const server = createServer(createApp());
-  const webSocketServer = attachWebSocketServer(server, { adaptationService });
+  const webSocketServer = attachWebSocketServer(server, { adaptationService, allowMissingOrigin: true });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const socket = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws`);
 

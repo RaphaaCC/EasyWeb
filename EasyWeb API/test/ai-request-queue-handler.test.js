@@ -36,10 +36,11 @@ test("processa uma solicitação pessoal antes dos próximos trabalhos de fundo"
       return { siteScript: { steps: [] } };
     }
   });
+  const personalText = "Aumente o tamanho dos botões; meu endereço é Rua Exemplo, 123.";
   const personal = queue.enqueue({
     type: "personal",
     origin: "https://example.com",
-    request: "Aumente o tamanho dos botões",
+    request: personalText,
     execute: async () => {
       order.push("personal");
       return { siteScript: { steps: [{ preset: "large-controls" }] } };
@@ -51,9 +52,10 @@ test("processa uma solicitação pessoal antes dos próximos trabalhos de fundo"
 
   assert.deepEqual(order, ["base-1", "personal", "base-2"]);
   assert.equal(events.some((entry) => entry.event === "ai.request.queued" &&
-    entry.fields.type === "personal" && entry.fields.request === "Aumente o tamanho dos botões"), true);
+    entry.fields.type === "personal" && entry.fields.requestLength === personalText.length), true);
   assert.equal(events.some((entry) => entry.event === "ai.request.completed" &&
     entry.fields.type === "personal" && entry.fields.steps === 1), true);
+  assert.equal(JSON.stringify(events).includes(personalText), false);
 });
 
 test("limita trabalhos aguardando sem interromper o trabalho ativo", async () => {

@@ -27,7 +27,8 @@ function formatFields(fields) {
   if (!fields || typeof fields !== "object") return "";
   return Object.entries(fields).flatMap(([key, value]) => {
     if (value === undefined || value === null || value === "") return [];
-    const sensitive = /(?:secret|token|password|authorization|snapshot|html|css|payload)/i.test(key);
+    const sensitive = /(?:secret|token|password|authorization|snapshot|html|css|payload)/i.test(key) ||
+      /^(?:request|userRequest|prompt|profile)$/i.test(key);
     const normalized = sensitive ? "[oculto]" : redactText(value);
     return normalized ? [`${key}=${quote(normalized)}`] : [];
   }).join(" ");

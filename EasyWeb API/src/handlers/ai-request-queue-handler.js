@@ -4,6 +4,10 @@ function safeText(value, maximum = 180) {
     : "";
 }
 
+function requestLength(value) {
+  return typeof value === "string" ? value.length : 0;
+}
+
 function stepCount(result) {
   return Array.isArray(result?.siteScript?.steps) ? result.siteScript.steps.length : undefined;
 }
@@ -28,11 +32,10 @@ export function createAiRequestQueue({
   }
 
   function log(event, job, extra = {}) {
-    const request = job.request ? { request: job.request } : {};
     logger.info?.(event, {
       type: job.type,
       origin: job.origin,
-      ...request,
+      ...(job.requestLength > 0 ? { requestLength: job.requestLength } : {}),
       waiting: waitingCount(),
       ...extra
     });
@@ -57,7 +60,7 @@ export function createAiRequestQueue({
       logger.warn?.("ai.request.failed", {
         type: next.type,
         origin: next.origin,
-        ...(next.request ? { request: next.request } : {}),
+        ...(next.requestLength > 0 ? { requestLength: next.requestLength } : {}),
         durationMs: Math.max(0, now() - startedAt),
         code: errorCode(error),
         retryable: error?.retryable === true
@@ -77,7 +80,7 @@ export function createAiRequestQueue({
       id: ++sequence,
       type: type === "personal" ? "personal" : "base",
       origin: safeText(origin, 240) || "unknown",
-      request: safeText(request),
+      requestLength: requestLength(request),
       execute
     };
     const targetQueue = job.type === "personal" ? personalQueue : baseQueue;

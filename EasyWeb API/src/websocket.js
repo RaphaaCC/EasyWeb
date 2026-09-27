@@ -37,8 +37,43 @@ function isInstallationId(value) {
   return typeof value === "string" && /^[a-z\d-]{16,128}$/i.test(value);
 }
 
-function isAllowedClientOrigin(value) {
-  return value === undefined || /^chrome-extension:\/\/[a-p]{32}$/i.test(value);
+function normalizeExtensionIds(value) {
+  const source = Array.isArray(value) ? value : String(value || "").split(",");
+  return new Set(source
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter((item) => /^[a-p]{32}$/.test(item)));
+}
+
+function createClientAccessPolicy({ allowedExtensionIds, allowMissingOrigin } = {}) {
+  const production = process.env.NODE_ENV === "production";
+  const configuredIds = allowedExtensionIds === undefined
+    ? process.env.EASYWEB_WS_ALLOWED_EXTENSION_IDS
+    : allowedExtensionIds;
+  const normalizedIds = normalizeExtensionIds(configuredIds);
+  const configuredMissingOrigin = allowMissingOrigin === undefined
+    ? process.env.EASYWEB_WS_ALLOW_MISSING_ORIGIN === "true"
+    : allowMissingOrigin === true;
+
+  return Object.freeze({
+    production,
+    allowedExtensionIds: normalizedIds,
+    requireAllowlist: production || normalizedIds.size > 0,
+    allowMissingOrigin: !production && configuredMissingOrigin
+  });
+}
+
+function isAllowedClientOrigin(value, policy) {
+  if (value === undefined) {
+    return policy.allowMissingOrigin;
+  }
+  const match = /^chrome-extension:\/\/([a-p]{32})$/i.exec(value);
+  if (!match) {
+    return false;
+  }
+  if (!policy.requireAllowlist) {
+    return true;
+  }
+  return policy.allowedExtensionIds.has(match[1].toLowerCase());
 }
 
 function isSnapshotId(value) {
@@ -400,7 +435,20 @@ async function handleMessage(socket, state, snapshotStore, adaptationService, re
   send(socket, { type: "easyweb:error", error: "Mensagem não permitida." });
 }
 
-export function attachWebSocketServer(httpServer, { snapshotStore, adaptationService, retentionHandler, logger = {} } = {}) {
+export function attachWebSocketServer(httpServer, {
+  snapshotStore,
+  adaptationService,
+  retentionHandler,
+  logger = {},
+  allowedExtensionIds,
+  allowMissingOrigin
+} = {}) {
+  const clientAccessPolicy = createClientAccessPolicy({ allowedExtensionIds, allowMissingOrigin });
+  logger.info?.("websocket.access-policy", {
+    mode: clientAccessPolicy.production ? "production" : "development",
+    allowedExtensions: clientAccessPolicy.allowedExtensionIds.size,
+    allowMissingOrigin: clientAccessPolicy.allowMissingOrigin
+  });
   const webSocketServer = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_MESSAGE_BYTES
@@ -420,7 +468,7 @@ export function attachWebSocketServer(httpServer, { snapshotStore, adaptationSer
 
   httpServer.on("upgrade", (request, socket, head) => {
     const requestUrl = new URL(request.url, "http://localhost");
-    if (requestUrl.pathname !== "/ws" || !isAllowedClientOrigin(request.headers.origin)) {
+    if (requestUrl.pathname !== "/ws" || !isAllowedClientOrigin(request.headers.origin, clientAccessPolicy)) {
       socket.destroy();
       return;
     }

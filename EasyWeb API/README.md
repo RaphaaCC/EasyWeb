@@ -32,7 +32,7 @@ As tabelas sincronizadas incluem `easyweb_site_snapshots`, `easyweb_adaptation_f
 
 ## Identidade local e retenção
 
-A extensão gera um identificador local aleatório para separar snapshots e pedidos pessoais. Não existe matrícula, segredo de instalação ou conta de usuário nesse protocolo. O identificador não contém dados pessoais e não é usado como autenticação.
+A extensão gera um identificador local aleatório para separar snapshots e pedidos pessoais. Não existe matrícula, segredo de instalação ou conta de usuário nesse protocolo. O identificador não contém dados pessoais e não é usado como autenticação. A autorização do cliente WebSocket é uma camada separada, baseada na origem da extensão e na allowlist configurada no servidor.
 
 `SNAPSHOT_RETENTION_DAYS` define por quantos dias a API mantém snapshots sem nova observação; o padrão é 30. A limpeza roda na inicialização e diariamente, em lotes definidos por `SNAPSHOT_RETENTION_BATCH_SIZE`. Quando uma exclusão deixa uma família sem snapshots-fonte, os jobs e planos derivados também são removidos. A página de configurações permite apagar os snapshots associados ao identificador local desta extensão.
 
@@ -44,7 +44,7 @@ O modelo recebe snapshots sanitizados e compatíveis da mesma origem para criar 
 
 Cada chamada tem timeout, retentativas para `408`, `429` e erros `5xx`, além de um circuit breaker. Após três falhas transitórias consecutivas, novas chamadas ficam suspensas por 60 segundos por padrão. Ajuste esses valores com `GEMINI_TIMEOUT_MS`, `GEMINI_RETRY_ATTEMPTS`, `GEMINI_CIRCUIT_FAILURE_THRESHOLD` e `GEMINI_CIRCUIT_COOLDOWN_MS`.
 
-Todas as chamadas ao Gemini passam por uma fila serial e limitada em memória. Pedidos pessoais enviados pelo popup têm prioridade sobre análises base pendentes; uma chamada que já começou termina antes da próxima iniciar. Os logs `ai.request.queued`, `ai.request.started`, `ai.request.completed`, `ai.request.failed` e `ai.request.rejected` mostram tipo, origem, duração e, para pedidos pessoais, o texto já sanitizado e truncado.
+Todas as chamadas ao Gemini passam por uma fila serial e limitada em memória. Pedidos pessoais enviados pelo popup têm prioridade sobre análises base pendentes; uma chamada que já começou termina antes da próxima iniciar. Os logs `ai.request.queued`, `ai.request.started`, `ai.request.completed`, `ai.request.failed` e `ai.request.rejected` mantêm apenas metadados operacionais, como tipo, origem, duração, tamanho do pedido e número de steps. O texto bruto do pedido pessoal não é registrado.
 
 ## Fila de planos base
 
@@ -80,6 +80,8 @@ A rota de dados exige o cabeçalho `X-EasyWeb-Admin-Token`. O painel não existe
 
 O endpoint local é `ws://127.0.0.1:3001/ws`. Em produção, publique-o como `wss://easyweb.api.raemi.xyz/ws`.
 
+Em produção (`NODE_ENV=production`), defina `EASYWEB_WS_ALLOWED_EXTENSION_IDS` com um ou mais IDs oficiais da extensão separados por vírgula. Se a allowlist estiver vazia ou inválida, o endpoint WebSocket falha fechado e rejeita upgrades. Em desenvolvimento, origens `chrome-extension://` válidas continuam aceitas sem allowlist; clientes sem cabeçalho `Origin` só são aceitos quando `EASYWEB_WS_ALLOW_MISSING_ORIGIN=true`, e essa exceção é ignorada em produção.
+
 Mensagens principais:
 
 - `easyweb:hello`, com `protocolVersion: 1` e um `installationId` local aleatório, conclui o handshake da extensão;
@@ -90,7 +92,7 @@ Mensagens principais:
 - `easyweb:adaptation:personal-request` e `easyweb:adaptation:personal-plan` tratam ajustes solicitados no popup e entregues apenas ao socket solicitante.
 - `easyweb:privacy:delete-snapshots` remove os snapshots associados ao identificador local da conexão e devolve apenas as contagens removidas.
 
-O servidor rejeita conexões iniciadas por páginas Web, snapshots maiores que 512 KB, caminhos com parâmetros ou fragmentos, identificadores inválidos e envios repetidos em menos de três segundos. Pedidos pessoais no mesmo socket têm intervalo mínimo de 15 segundos. Clientes de serviço sem cabeçalho `Origin` continuam aceitos para testes e integrações locais.
+O servidor rejeita conexões iniciadas por páginas Web, clientes fora da allowlist quando ela é exigida, snapshots maiores que 512 KB, caminhos com parâmetros ou fragmentos, identificadores inválidos e envios repetidos em menos de três segundos. Pedidos pessoais no mesmo socket têm intervalo mínimo de 15 segundos. Clientes sem cabeçalho `Origin` ficam bloqueados por padrão e só podem ser habilitados explicitamente em ambiente local ou de teste.
 
 Antes de gravar, a API reduz o HTML à topologia de tags e remove texto, atributos, scripts e elementos incorporados. No CSS, remove imports, fontes remotas, URLs externas e construções executáveis. Cookies, textos, atributos identificáveis, URLs completas de assets e código JavaScript não entram no banco. O payload nunca é escrito no log.
 
@@ -99,6 +101,7 @@ Antes de gravar, a API reduz o HTML à topologia de tags e remove texto, atribut
 - Limite do corpo JSON: `100 KB`.
 - Cabeçalhos de segurança fornecidos pelo Helmet.
 - CORS configurável por `CORS_ORIGIN`.
+- WebSocket com allowlist de IDs da extensão em produção e bloqueio de clientes sem `Origin` por padrão.
 - Snapshots estruturais autorizados são persistidos como JSON comprimido no MySQL quando o banco está configurado.
 - Não existe matrícula nem segredo de instalação no protocolo.
 - Snapshots expiram automaticamente e podem ser removidos sob demanda pela extensão que mantém o identificador local correspondente.

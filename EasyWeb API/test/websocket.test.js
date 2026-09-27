@@ -33,7 +33,7 @@ function waitForMatchingMessage(socket, matches) {
 
 test("aceita hello e responde ao heartbeat pelo WebSocket", async (context) => {
   const server = createServer(createApp());
-  const webSocketServer = attachWebSocketServer(server);
+  const webSocketServer = attachWebSocketServer(server, { allowMissingOrigin: true });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
   const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
@@ -62,7 +62,7 @@ test("aceita hello e responde ao heartbeat pelo WebSocket", async (context) => {
 
 test("exige handshake antes de responder a heartbeat", async (context) => {
   const server = createServer(createApp());
-  const webSocketServer = attachWebSocketServer(server);
+  const webSocketServer = attachWebSocketServer(server, { allowMissingOrigin: true });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const socket = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws`);
 
@@ -83,7 +83,7 @@ test("exige handshake antes de responder a heartbeat", async (context) => {
 
 test("não permite trocar a instalação depois do handshake", async (context) => {
   const server = createServer(createApp());
-  const webSocketServer = attachWebSocketServer(server);
+  const webSocketServer = attachWebSocketServer(server, { allowMissingOrigin: true });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const socket = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws`);
   context.after(() => {
@@ -132,9 +132,62 @@ test("recusa conexões WebSocket iniciadas por páginas Web", async (context) =>
   assert.equal(outcome, "rejected");
 });
 
+test("rejeita clientes sem Origin por padrão", async (context) => {
+  const server = createServer(createApp());
+  const webSocketServer = attachWebSocketServer(server);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => {
+    webSocketServer.close();
+    server.close();
+  });
+
+  const socket = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws`);
+  const outcome = await new Promise((resolve) => {
+    socket.once("open", () => resolve("opened"));
+    socket.once("error", () => resolve("rejected"));
+  });
+  assert.equal(outcome, "rejected");
+});
+
+test("restringe o WebSocket aos IDs de extensão configurados", async (context) => {
+  const allowedId = "a".repeat(32);
+  const server = createServer(createApp());
+  const webSocketServer = attachWebSocketServer(server, { allowedExtensionIds: [allowedId] });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => {
+    webSocketServer.close();
+    server.close();
+  });
+
+  const rejected = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws`, {
+    origin: `chrome-extension://${"b".repeat(32)}`
+  });
+  const rejectedOutcome = await new Promise((resolve) => {
+    rejected.once("open", () => resolve("opened"));
+    rejected.once("error", () => resolve("rejected"));
+  });
+  assert.equal(rejectedOutcome, "rejected");
+
+  const accepted = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws`, {
+    origin: `chrome-extension://${allowedId}`
+  });
+  context.after(() => accepted.close());
+  await new Promise((resolve, reject) => {
+    accepted.once("open", resolve);
+    accepted.once("error", reject);
+  });
+  accepted.send(JSON.stringify({
+    type: "easyweb:hello",
+    protocolVersion: 1,
+    installationId: "ca5ce777-31e1-4892-b93c-9d282b0732f7"
+  }));
+  assert.equal((await waitForMessage(accepted)).type, "easyweb:hello");
+});
+
 test("remove somente os snapshots identificados pela instalação da conexão", async (context) => {
   const server = createServer(createApp());
   const webSocketServer = attachWebSocketServer(server, {
+    allowMissingOrigin: true,
     snapshotStore: {
       deleteForInstallation: async ({ installationId }) => ({ snapshots: installationId === "ca5ce777-31e1-4892-b93c-9d282b0732f7" ? 2 : 0, plans: 1, families: 1, jobs: 0 })
     }
@@ -173,6 +226,7 @@ test("encaminha snapshots estruturais após o handshake", async (context) => {
   const stored = [];
   const server = createServer(createApp());
   const webSocketServer = attachWebSocketServer(server, {
+    allowMissingOrigin: true,
     snapshotStore: {
       store: async (payload) => {
         stored.push(payload);
@@ -230,6 +284,7 @@ test("encaminha snapshots estruturais após o handshake", async (context) => {
 test("marca uma falha definitiva ao armazenar o snapshot como nao reenviavel", async (context) => {
   const server = createServer(createApp());
   const webSocketServer = attachWebSocketServer(server, {
+    allowMissingOrigin: true,
     snapshotStore: {
       store: async () => {
         throw Object.assign(new Error("Snapshot invalido."), { code: "EASYWEB_INVALID_SNAPSHOT" });
@@ -271,6 +326,7 @@ test("marca uma falha definitiva ao armazenar o snapshot como nao reenviavel", a
 test("entrega o plano base depois de confirmar o snapshot", async (context) => {
   const server = createServer(createApp());
   const webSocketServer = attachWebSocketServer(server, {
+    allowMissingOrigin: true,
     snapshotStore: {
       store: async () => ({
         page: { origin: "https://example.com", path: "/" },
@@ -321,6 +377,7 @@ test("entrega pedidos pessoais apenas como resposta transitória do WebSocket", 
   const calls = [];
   const server = createServer(createApp());
   const webSocketServer = attachWebSocketServer(server, {
+    allowMissingOrigin: true,
     adaptationService: {
       createPersonalPlan: async (payload) => {
         calls.push(payload);
@@ -392,6 +449,7 @@ test("nao inicia duas analises para o mesmo pedido pessoal em andamento", async 
   });
   const server = createServer(createApp());
   const webSocketServer = attachWebSocketServer(server, {
+    allowMissingOrigin: true,
     adaptationService: {
       createPersonalPlan: async (payload) => {
         calls.push(payload);
@@ -452,6 +510,7 @@ test("nao inicia duas analises para o mesmo pedido pessoal em andamento", async 
 test("informa uma falha temporária do Gemini no pedido pessoal", async (context) => {
   const server = createServer(createApp());
   const webSocketServer = attachWebSocketServer(server, {
+    allowMissingOrigin: true,
     adaptationService: {
       createPersonalPlan: async () => {
         throw Object.assign(new Error("Tempo esgotado."), { code: "EASYWEB_GEMINI_TIMEOUT", retryable: true });
