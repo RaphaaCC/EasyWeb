@@ -142,7 +142,7 @@
     reading: Object.freeze({
       id: "reading",
       label: "Leitura focada",
-      description: "Aumenta a legibilidade e organiza regiões de conteúdo para leitura prolongada.",
+      description: "Guia de leitura que acompanha o mouse ou o foco do teclado e escurece suavemente o restante da página.",
       settings: Object.freeze({
         enabled: true,
         fontScale: 1.2,

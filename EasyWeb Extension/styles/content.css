@@ -78,11 +78,6 @@ html.easyweb-enabled.easyweb-reduce-motion *::after {
   transition-duration: 0.01ms !important;
 }
 
-html.easyweb-enabled.easyweb-reading-focus :is(article, [role="main"]) {
-  max-width: 76ch !important;
-  margin-inline: auto !important;
-}
-
 html.easyweb-enabled body[data-easyweb-contrast="dark"],
 html.easyweb-enabled body [data-easyweb-contrast="dark"] {
   color: #000 !important;

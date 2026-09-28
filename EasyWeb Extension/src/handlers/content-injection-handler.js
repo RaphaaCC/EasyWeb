@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_VERSION = 7;
+  const CONTENT_VERSION = 8;
   const CONTENT_FILES = Object.freeze([
     "src/handlers/settings-handler.js",
     "src/handlers/color-filter-handler.js",
@@ -9,6 +9,7 @@
     "src/handlers/mapping-security-handler.js",
     "src/handlers/ai-adaptation-handler.js",
     "src/handlers/accessibility-handler.js",
+    "src/handlers/reading-focus-handler.js",
     "src/handlers/notification-handler.js",
     "src/content.js"
   ]);

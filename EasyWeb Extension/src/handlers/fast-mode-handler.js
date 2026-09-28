@@ -1,6 +1,6 @@
 (() => {
   const ASSESSMENT_DURATION = 1500;
-  const CACHE_VERSION = 4;
+  const CACHE_VERSION = 5;
   const MAX_ELEMENTS = 5000;
   const MAX_STRUCTURAL_MUTATIONS = 70;
   const CACHE_KEY_PREFIX = "easyweb:fast-style:";
@@ -292,12 +292,6 @@
     if (settings.reduceMotion) {
       css.push(
         `${prefix} *,${prefix} *::before,${prefix} *::after{animation-delay:0ms!important;animation-duration:0.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-delay:0ms!important;transition-duration:0.01ms!important;}`
-      );
-    }
-
-    if (settings.readingFocus) {
-      css.push(
-        `${prefix} :is(article,[role=main]){max-width:76ch!important;margin-inline:auto!important;}`
       );
     }
 

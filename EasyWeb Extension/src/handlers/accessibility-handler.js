@@ -5,6 +5,7 @@
     const colorFilter = EasyWebColorFilterHandler.create();
     const contrast = EasyWebContrastHandler.create(getTextElements);
     const links = EasyWebLinkHandler.create();
+    const readingFocus = EasyWebReadingFocusHandler.create();
     let observer;
     let mutationTimer;
     let appliedFontScale = 1;
@@ -134,6 +135,7 @@
       root.classList.toggle("easyweb-links", cached.enabled && cached.highlightLinks);
       root.classList.toggle("easyweb-reduce-motion", cached.enabled && cached.reduceMotion);
       root.classList.toggle("easyweb-reading-focus", cached.enabled && cached.readingFocus);
+      readingFocus.apply(cached.enabled && cached.readingFocus);
       root.classList.toggle("easyweb-dyslexia-font", cached.enabled && cached.dyslexiaFont);
       root.style.setProperty("--easyweb-line-height", cached.lineHeight);
       root.style.setProperty("--easyweb-letter-spacing", `${cached.letterSpacing}px`);
@@ -142,6 +144,7 @@
     }
 
     function clearCachedStyles() {
+      readingFocus.apply(false);
       cachedStylesInUse = false;
       Object.assign(state, settingsApi.DEFAULTS);
       colorFilter.apply("none", false);
@@ -180,6 +183,7 @@
       root.classList.toggle("easyweb-links", state.enabled && state.highlightLinks);
       root.classList.toggle("easyweb-reduce-motion", state.enabled && state.reduceMotion);
       root.classList.toggle("easyweb-reading-focus", state.enabled && state.readingFocus);
+      readingFocus.apply(state.enabled && state.readingFocus);
       root.classList.toggle("easyweb-dyslexia-font", state.enabled && state.dyslexiaFont);
       root.style.setProperty("--easyweb-line-height", state.lineHeight);
       root.style.setProperty("--easyweb-letter-spacing", `${state.letterSpacing}px`);
