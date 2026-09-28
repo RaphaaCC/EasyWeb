@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_VERSION = 6;
+  const CONTENT_VERSION = 7;
   const hasExtensionContext = globalThis.chrome?.runtime?.onMessage &&
     globalThis.chrome?.storage?.local;
   const hasHandlers = globalThis.EasyWebSettingsHandler &&

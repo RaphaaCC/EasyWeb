@@ -114,6 +114,12 @@ function renderProfiles(activeProfileId) {
       meta.appendChild(contrast);
     }
 
+    if (profile.settings.dyslexiaFont) {
+      const font = document.createElement("span");
+      font.textContent = "OpenDyslexic";
+      meta.appendChild(font);
+    }
+
     if (profile.settings.reduceMotion) {
       const motion = document.createElement("span");
       motion.className = "meta-pill";
@@ -145,6 +151,7 @@ async function selectProfile(profileId) {
 
 async function loadSettings() {
   try {
+    await settingsApi.migrateProfiles();
     const saved = await chrome.storage.local.get([
       settingsApi.ACTIVE_PROFILE_KEY,
       settingsApi.DALTONIC_FILTER_KEY,

@@ -1,6 +1,6 @@
 (() => {
   const ASSESSMENT_DURATION = 1500;
-  const CACHE_VERSION = 3;
+  const CACHE_VERSION = 4;
   const MAX_ELEMENTS = 5000;
   const MAX_STRUCTURAL_MUTATIONS = 70;
   const CACHE_KEY_PREFIX = "easyweb:fast-style:";
@@ -276,6 +276,17 @@
         `${prefix} body a[href]{text-decoration:underline!important;text-decoration-thickness:2px!important;text-underline-offset:.15em!important;}`,
         `${prefix} body a[href]:hover,${prefix} body a[href]:focus-visible{outline:3px solid #ffbf47!important;outline-offset:2px!important;background-color:#ffbf47!important;color:#123c35!important;border-radius:3px!important;}`
       );
+    }
+
+    if (settings.dyslexiaFont) {
+      for (const [variant, weight, style] of [
+        ["Regular", 400, "normal"], ["Bold", 700, "normal"],
+        ["Italic", 400, "italic"], ["Bold-Italic", 700, "italic"]
+      ]) {
+        const url = chrome.runtime.getURL(`assets/fonts/OpenDyslexic-${variant}.woff2`);
+        css.push(`@font-face{font-family:OpenDyslexic;src:url("${url}") format("woff2");font-weight:${weight};font-style:${style};font-display:swap;}`);
+      }
+      css.push(`${prefix} body,${prefix} body :where(p,div,span,li,blockquote,label,button,input,textarea,select,option,a,h1,h2,h3,h4,h5,h6,td,th,figcaption,summary,strong,em,b,small):not(:where([class*="icon"],[class*="symbol"],[class^="fa"],[aria-hidden="true"],[role="img"],[role="img"] *,svg *,math *)){font-family:OpenDyslexic,sans-serif!important;}`);
     }
 
     if (settings.reduceMotion) {

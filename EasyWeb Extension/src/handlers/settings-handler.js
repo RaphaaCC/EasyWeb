@@ -39,7 +39,7 @@
     default: Object.freeze({
       id: "default",
       label: "Padrão",
-      description: "Ajustes manuais e individuais para cada site.",
+      description: "Mantém a aparência original. Permite ajustes manuais por site e filtro de cores global.",
       settings: Object.freeze({
         enabled: false,
         fontScale: 1,
@@ -79,56 +79,23 @@
         fontScale: 1.15,
         lineHeight: 1.6,
         letterSpacing: 0.3,
-        contrast: true,
-        highlightLinks: true,
-        reduceMotion: false,
-        readingFocus: false,
-        colorFilter: "none",
-        fastMode: false
-      })
-    }),
-    pcd: Object.freeze({
-      id: "pcd",
-      label: "PCD",
-      description: "Um ponto de partida com mais contraste, tamanho e espaçamento.",
-      settings: Object.freeze({
-        enabled: true,
-        fontScale: 1.15,
-        lineHeight: 1.7,
-        letterSpacing: 0.5,
-        contrast: true,
-        highlightLinks: true,
-        reduceMotion: false,
-        readingFocus: false,
-        colorFilter: "none",
-        fastMode: false
-      })
-    }),
-    colorblind: Object.freeze({
-      id: "colorblind",
-      label: "Daltônico",
-      description: "Filtro de cores para facilitar a diferenciação visual.",
-      settings: Object.freeze({
-        enabled: true,
-        fontScale: 1.1,
-        lineHeight: 1.6,
-        letterSpacing: 0.3,
         contrast: false,
         highlightLinks: true,
         reduceMotion: false,
         readingFocus: false,
-        colorFilter: "deuteranopia",
+        colorFilter: "none",
         fastMode: false
       })
     }),
     dyslexia: Object.freeze({
       id: "dyslexia",
       label: "Dislexia",
-      description: "Mais espaço e ritmo de leitura para reduzir a aglomeração visual.",
+      description: "Fonte OpenDyslexic, texto ampliado e mais espaço entre letras e linhas.",
       settings: Object.freeze({
         enabled: true,
         fontScale: 1.2,
         lineHeight: 1.9,
+        dyslexiaFont: true,
         letterSpacing: 0.8,
         contrast: false,
         highlightLinks: true,
@@ -263,13 +230,26 @@
       highlightLinks: Boolean(settings.highlightLinks),
       reduceMotion: Boolean(settings.reduceMotion),
       readingFocus: Boolean(settings.readingFocus),
+      dyslexiaFont: Boolean(settings.dyslexiaFont),
       colorFilter: normalizeFilter(settings.colorFilter),
       fastMode: Boolean(settings.fastMode)
     };
   }
 
   function getProfile(profileId) {
+    if (profileId === "pcd") return PROFILES.elderly;
     return PROFILES[profileId] || PROFILES.default;
+  }
+
+  async function migrateProfiles() {
+    const saved = await chrome.storage.local.get([ACTIVE_PROFILE_KEY, DALTONIC_FILTER_KEY]);
+    const previous = saved[ACTIVE_PROFILE_KEY];
+    if (previous !== "colorblind" && previous !== "pcd") return;
+    const updates = { [ACTIVE_PROFILE_KEY]: previous === "pcd" ? "elderly" : "default" };
+    if (previous === "colorblind" && saved[DALTONIC_FILTER_KEY] === undefined) {
+      updates[DALTONIC_FILTER_KEY] = { enabled: true, type: "deuteranopia" };
+    }
+    await chrome.storage.local.set(updates);
   }
 
   function create(locationLike) {
@@ -339,6 +319,7 @@
         return key === siteStorageKey || key === siteManualModeStorageKey || key === aiSiteStorageKey;
       },
       async load() {
+        await migrateProfiles();
         const saved = await chrome.storage.local.get([
           ACTIVE_PROFILE_KEY,
           DALTONIC_FILTER_KEY,
@@ -356,9 +337,9 @@
         const baseSettings = manualMode && siteOverride ? siteOverride : profile.settings;
         const settings = {
           ...baseSettings,
-          enabled: extensionEnabled && baseSettings.enabled,
+          enabled: extensionEnabled && (baseSettings.enabled || (!manualMode && Boolean(universalFilter))),
           fastMode: extensionEnabled && baseSettings.fastMode,
-          colorFilter: universalFilter || baseSettings.colorFilter
+          colorFilter: manualMode && siteOverride ? baseSettings.colorFilter : universalFilter || baseSettings.colorFilter
         };
 
         return {
@@ -611,6 +592,7 @@
     RESTORE_GLOBAL_PROFILE_KEY,
     DEFAULTS: PROFILES.default.settings,
     PROFILES,
+    migrateProfiles,
     normalize,
     normalizeApiBaseUrl,
     normalizeFilter,

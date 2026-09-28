@@ -134,6 +134,7 @@
       root.classList.toggle("easyweb-links", cached.enabled && cached.highlightLinks);
       root.classList.toggle("easyweb-reduce-motion", cached.enabled && cached.reduceMotion);
       root.classList.toggle("easyweb-reading-focus", cached.enabled && cached.readingFocus);
+      root.classList.toggle("easyweb-dyslexia-font", cached.enabled && cached.dyslexiaFont);
       root.style.setProperty("--easyweb-line-height", cached.lineHeight);
       root.style.setProperty("--easyweb-letter-spacing", `${cached.letterSpacing}px`);
       colorFilter.apply(cached.colorFilter, cached.enabled);
@@ -150,7 +151,8 @@
         "easyweb-contrast",
         "easyweb-links",
         "easyweb-reduce-motion",
-        "easyweb-reading-focus"
+        "easyweb-reading-focus",
+        "easyweb-dyslexia-font"
       );
       root.style.removeProperty("--easyweb-line-height");
       root.style.removeProperty("--easyweb-letter-spacing");
@@ -178,6 +180,7 @@
       root.classList.toggle("easyweb-links", state.enabled && state.highlightLinks);
       root.classList.toggle("easyweb-reduce-motion", state.enabled && state.reduceMotion);
       root.classList.toggle("easyweb-reading-focus", state.enabled && state.readingFocus);
+      root.classList.toggle("easyweb-dyslexia-font", state.enabled && state.dyslexiaFont);
       root.style.setProperty("--easyweb-line-height", state.lineHeight);
       root.style.setProperty("--easyweb-letter-spacing", `${state.letterSpacing}px`);
 

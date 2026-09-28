@@ -1,5 +1,5 @@
 (() => {
-  const CACHE_VERSION = 3;
+  const CACHE_VERSION = 4;
   const STYLE_ID = "easyweb-fast-style-cache";
   const cacheKey = `easyweb:fast-style:${location.pathname}${location.search}`;
 

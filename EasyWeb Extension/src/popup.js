@@ -19,6 +19,7 @@ const controls = {
   highlightLinks: document.querySelector("#highlight-links"),
   reduceMotion: document.querySelector("#reduce-motion"),
   readingFocus: document.querySelector("#reading-focus"),
+  dyslexiaFont: document.querySelector("#dyslexia-font"),
   colorFilterEnabled: document.querySelector("#color-filter-enabled"),
   colorFilterType: document.querySelector("#color-filter-type"),
   fastMode: document.querySelector("#fast-mode")
@@ -76,6 +77,7 @@ function readSettings() {
     highlightLinks: controls.highlightLinks.checked,
     reduceMotion: controls.reduceMotion.checked,
     readingFocus: controls.readingFocus.checked,
+    dyslexiaFont: controls.dyslexiaFont.checked,
     colorFilter: controls.colorFilterEnabled.checked ? controls.colorFilterType.value : "none",
     fastMode: controls.fastMode.checked && !controls.fastMode.disabled
   };
@@ -90,6 +92,7 @@ function renderSettings(settings) {
   controls.highlightLinks.checked = next.highlightLinks;
   controls.reduceMotion.checked = next.reduceMotion;
   controls.readingFocus.checked = next.readingFocus;
+  controls.dyslexiaFont.checked = Boolean(next.dyslexiaFont);
   controls.colorFilterEnabled.checked = next.colorFilter !== "none";
   controls.colorFilterType.value = next.colorFilter === "none" ? "deuteranopia" : next.colorFilter;
   controls.fastMode.checked = next.fastMode;

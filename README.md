@@ -2,7 +2,7 @@
 
 > Tornando a Web mais democrática e acessível para todas as pessoas.
 
-![Versão](https://img.shields.io/badge/versão-v1.0.5%20Beta-00a99d?style=flat-square)
+![Versão](https://img.shields.io/badge/versão-v1.0.6%20Beta-00a99d?style=flat-square)
 ![Licença](https://img.shields.io/badge/licença-MIT-2563eb?style=flat-square)
 ![Chrome](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)
@@ -38,6 +38,10 @@ EasyWeb/
 5. Abra uma página Web e clique no ícone do EasyWeb para ativar os ajustes.
 
 Na página de configurações, é possível escolher perfis globais, selecionar o modo Padrão ou Aprimorado e administrar o consentimento para snapshots.
+
+Os perfis disponíveis são Padrão, Idoso, Crianças, Dislexia, Baixa visão, Sensibilidade visual e Leitura focada. O filtro para daltonismo é independente do perfil. Dislexia usa a fonte OpenDyslexic incluída na extensão, também disponível nos ajustes manuais de cada site. As preferências manuais substituem o perfil global naquele site.
+
+Na atualização 1.0.6, o antigo perfil Daltônico passa para Padrão com o filtro de cores preservado; PCD passa para Idoso, o preset mais próximo, e pode ser substituído por um perfil específico nas configurações. A fonte OpenDyslexic é distribuída sob SIL OFL 1.1; sua licença acompanha os arquivos em `EasyWeb Extension/assets/fonts`.
 
 ## Executar a API localmente
 
